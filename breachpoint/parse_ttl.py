@@ -2,19 +2,18 @@
 
 两阶段处理：
   1. rdflib 结构解析：提取所有三元组、类、个体、对象属性、数据属性（不遗漏）
-  2. LLM 信息补全：将节点原始属性拼接后交给 Sonnet，生成全面中文标签和摘要
+  2. LLM 信息补全：通过 claude CLI 子进程（无需 API key），生成全面中文标签和摘要
 
 所有标签与关系名均输出为中文。
 
 公开 API:
-    parse_ttl(path, client) -> dict   — {nodes, edges}
+    parse_ttl(path) -> dict   — {nodes, edges}
 """
 from __future__ import annotations
 import json
-import os
 import re
+import subprocess
 from pathlib import Path
-from typing import Any
 
 # ── 谓词 URI 本地名 → 中文关系名 ─────────────────────────────────────────────
 
@@ -161,9 +160,8 @@ _SCHEMA_NS = (
     "http://www.w3.org/2001/XMLSchema#",
 )
 
-_SYSTEM_PROMPT = """\
-你是 RDF 知识图谱专家。给定从 TTL 文件解析出的一批节点原始数据（包含所有属性），\
-以及对应的 TTL 原文片段，请为每个节点生成：
+_ENRICH_PROMPT_TMPL = """\
+你是 RDF 知识图谱专家。给定从 TTL 文件解析出的一批节点原始数据（包含所有属性），以及对应的 TTL 原文片段，请为每个节点生成：
 
 1. **label**：简洁中文标签（2-6字，优先使用已有中文名称）
 2. **summary**：全面中文摘要（一段话，必须涵盖节点的所有重要属性值，不得遗漏任何信息）
@@ -171,8 +169,16 @@ _SYSTEM_PROMPT = """\
 规则：
 - 如果节点已有合适的中文名称，保留并使用它作为 label
 - summary 需将所有属性值用自然语言串联，避免直接罗列 key:value
-- 输出 JSON 数组，格式：[{"id": "节点id", "label": "中文标签", "summary": "全面中文摘要"}, ...]
+- 输出 JSON 数组，格式：[{{"id": "节点id", "label": "中文标签", "summary": "全面中文摘要"}}, ...]
 - 仅输出 JSON 数组，不输出任何其他内容
+
+TTL 原文片段（供上下文参考）：
+```
+{ttl_context}
+```
+
+节点原始数据（共 {count} 个）：
+{nodes_json}
 """
 
 
@@ -249,49 +255,47 @@ def _build_node_context(node: dict) -> str:
 def _enrich_with_llm(
     nodes: list[dict],
     ttl_text: str,
-    client: Any,
     batch_size: int = 15,
 ) -> dict[str, dict]:
-    """调用 LLM 为节点补全中文标签和全面摘要。
+    """通过 claude CLI 子进程为节点补全中文标签和全面摘要。
 
+    使用本机已配置的 Claude Code CLI（claude -p），无需 API key 或 client 对象。
     Returns:
         {node_id: {"label": "...", "summary": "..."}}
     """
+    import sys
     enriched: dict[str, dict] = {}
-
-    # 截取 TTL 原文（避免超长）
     ttl_context = ttl_text[:6000] if len(ttl_text) > 6000 else ttl_text
 
     for i in range(0, len(nodes), batch_size):
         batch = nodes[i: i + batch_size]
 
-        # 构建节点描述（包含所有属性）
         node_descs = []
         for n in batch:
             ctx = _build_node_context(n)
-            desc = {
+            node_descs.append({
                 "id": n["id"],
                 "当前标签": n.get("label", ""),
                 "节点类型": n.get("type", ""),
                 "已有摘要": n.get("summary", ""),
                 "所有属性": ctx,
-            }
-            node_descs.append(desc)
+            })
 
-        prompt = (
-            f"TTL 原文片段（供上下文参考）：\n```\n{ttl_context}\n```\n\n"
-            f"节点原始数据（共 {len(batch)} 个）：\n"
-            + json.dumps(node_descs, ensure_ascii=False, indent=2)
+        prompt = _ENRICH_PROMPT_TMPL.format(
+            ttl_context=ttl_context,
+            count=len(batch),
+            nodes_json=json.dumps(node_descs, ensure_ascii=False, indent=2),
         )
 
         try:
-            resp = client.messages.create(
-                model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-                max_tokens=4096,
-                system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
+            result = subprocess.run(
+                ["claude", "-p", prompt],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=120,
             )
-            raw = resp.content[0].text.strip()
+            raw = result.stdout.strip()
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
             items = json.loads(raw)
@@ -302,9 +306,10 @@ def _enrich_with_llm(
                         "label": item.get("label", ""),
                         "summary": item.get("summary", ""),
                     }
+        except FileNotFoundError:
+            print("[parse_ttl] 未找到 claude 命令，跳过 LLM 补全（请确认 Claude Code CLI 已安装）", file=sys.stderr)
+            break
         except Exception as exc:
-            # LLM 失败时保留原始数据，不中断流程
-            import sys
             print(f"[parse_ttl] LLM 补全批次 {i//batch_size+1} 失败: {exc}", file=sys.stderr)
 
     return enriched
@@ -312,20 +317,13 @@ def _enrich_with_llm(
 
 def parse_ttl(
     path: str | Path,
-    client: Any = None,
 ) -> dict:
     """解析 TTL/RDF 文件，两阶段处理后返回 {nodes, edges}。
 
     阶段一：rdflib 提取所有三元组（结构完整，零遗漏）
-    阶段二：LLM 补全中文标签和全面摘要（当 client 不为 None 时执行）
+    阶段二：claude CLI 子进程补全中文标签和摘要
 
-    Args:
-        path:   TTL 文件路径
-        client: anthropic.Anthropic 实例（为 None 时跳过 LLM 补全）
-        model:  使用的模型 ID
-
-    Returns::
-
+    Returns:
         {
             "nodes": [{"id", "label", "type", "summary", "source_file", ...所有数据属性}],
             "edges": [{"source", "target", "relation", "confidence", "evidence"}],
@@ -437,10 +435,10 @@ def parse_ttl(
             "evidence": f"三元组：{src_label} → {relation} → {tgt_label}",
         })
 
-    # ── 阶段二：LLM 补全中文标签和摘要 ────────────────────────────────────
+    # ── 阶段二：claude CLI 补全中文标签和摘要 ─────────────────────────────────
 
-    if client is not None and nodes:
-        enriched = _enrich_with_llm(nodes, ttl_text, client)
+    if nodes:
+        enriched = _enrich_with_llm(nodes, ttl_text)
         for node in nodes:
             nid = node["id"]
             if nid in enriched:
