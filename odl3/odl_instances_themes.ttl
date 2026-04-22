@@ -1,0 +1,94 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix odl: <http://webank.com/odl/ontology#> .
+@prefix ex: <http://webank.com/odl/instance#> .
+
+#############################################################
+# 主题任务实例
+#############################################################
+
+### 1. 监管规则一致性agent
+ex:Theme_RuleConsistency rdf:type odl:Theme ;
+  rdfs:label "监管规则一致性agent" ;
+  odl:description "DGSM扫描出来的上游未实现的监控规则，或新增加的监控规则，需要上游系统的SA推动排期上线，探索使用agent方式自动生成对应需求、规则、沟通排期及更新知识库。" ;
+  odl:themeCategory "运维效能类" ;
+  odl:themeFocus "异常规则快模式、规则部署推广" ;
+  odl:startTime "2025-11-01T00:00:00"^^xsd:dateTime ;
+  odl:plannedCompletionTime "2099-12-31T23:59:59"^^xsd:dateTime ;
+  odl:status "运营中" ;
+  odl:priority "重要" ;
+  odl:belongsTo ex:ODL_Project ;
+  odl:responsibleFor ex:Person_HuangQiaoLong ;
+  odl:contentDescription "ODL-异常规则10倍快模式正式上线，持续运营中" ;
+  odl:effectiveness "截止目前累计部署13个版本，覆盖203条异常规则。单版本节省0.15人月，累计节省1.95人月。2026年预计成效：月均4-6版本节奏下，可节省10人月。" ;
+  odl:savedManMonths "1.95"^^xsd:decimal .
+
+ex:Theme_RuleConsistency odl:hasTool ex:Tool_DGSM .
+ex:Theme_RuleConsistency odl:hasIndicator ex:Indicator_RuleDeployedVersions .
+ex:Theme_RuleConsistency odl:hasIndicator ex:Indicator_SavedManMonths .
+
+### 2. 异常报错辅助定位交付物
+ex:Theme_ExceptionLocation rdf:type odl:Theme ;
+  rdfs:label "异常报错辅助定位交付物扩展到大数据领域" ;
+  odl:description "针对关键系统在开发设计阶段就维护系统运行异常报错的辅助定位交付物，在出现异常告警时提供排查指引和思路，提高异常分析定位效率，缩短平均故障修复时间(MTTR)。" ;
+  odl:themeCategory "运维效能类" ;
+  odl:themeFocus "异常定位、TSP、WTSS、大数据门禁" ;
+  odl:startTime "2025-05-01T00:00:00"^^xsd:dateTime ;
+  odl:plannedCompletionTime "2026-04-30T23:59:59"^^xsd:dateTime ;
+  odl:status "推广中" ;
+  odl:priority "重要" ;
+  odl:belongsTo ex:ODL_Project ;
+  odl:responsibleFor ex:Person_HeLiu ;
+  odl:contentDescription "TSP存量初始化覆盖率90%，WTSS Hook功能上线，各部门接入中" ;
+  odl:efficiencyGain "新组件可直接定位异常数据，节省数据查询和定位时间约10-15分钟，夜间操作约5-10分钟" ;
+  odl:progress "TSP预计本周到下周灰度投产，约1000个任务" ;
+  odl:progressPercentage "90.0"^^xsd:decimal .
+
+ex:Theme_ExceptionLocation odl:hasTool ex:Tool_TSP .
+ex:Theme_ExceptionLocation odl:hasTool ex:Tool_WTSS .
+ex:Theme_ExceptionLocation odl:hasIndicator ex:Indicator_TSPOutputRate .
+ex:Theme_ExceptionLocation odl:hasIndicator ex:Indicator_WTSSAccessRate .
+
+### 3. 大数据领域可运维性左移
+ex:Theme_BigDataLeftShift rdf:type odl:Theme ;
+  rdfs:label "大数据领域可运维性左移" ;
+  odl:description "夜间批量集中在凌晨0-7点之间作业，关键批量和非关键批量的资源使用存在互相挤兑现象，导致关键批量的时效性和稳定性得不到保障。从近几次bdp/bdap的生产故障来看，异常时批量等级的识别直接影响了批量恢复时效，凸显了批量等级管理规范制定的重要性。" ;
+  odl:themeCategory "数据治理类" ;
+  odl:themeFocus "数据生命周期、容灾备份、量时监控、批量等级管理" ;
+  odl:startTime "2025-11-01T00:00:00"^^xsd:dateTime ;
+  odl:plannedCompletionTime "2026-04-30T23:59:59"^^xsd:dateTime ;
+  odl:status "推进中" ;
+  odl:priority "紧急" ;
+  odl:belongsTo ex:ODL_Project ;
+  odl:responsibleFor ex:Person_ZhuJiaWei ;
+  odl:contentDescription "完成各部门批量应用等级划分，同步容灾数据备份打标，重新打标启动，队列调整计划" ;
+  odl:effectiveness "同步容灾效果数据：截止2026年4月10日已节省6P容量。IO资源划分设计和结果进度90%。断批统计预计4月底上线，已节省5亿流量。" ;
+  odl:progress "重新打标已完成，待导入系统；断批跟临时统计预计4月底上线，进度40%" .
+
+ex:Theme_BigDataLeftShift odl:hasTool ex:Tool_BDP .
+ex:Theme_BigDataLeftShift odl:hasTool ex:Tool_BDAP .
+ex:Theme_BigDataLeftShift odl:hasTool ex:Tool_WTSS .
+ex:Theme_BigDataLeftShift odl:hasIndicator ex:Indicator_DeptBatchLevelDistribution .
+ex:Theme_BigDataLeftShift odl:hasIndicator ex:Indicator_DBASavedCapacity .
+ex:Theme_BigDataLeftShift odl:hasRisk ex:Risk_BDPDeadlock .
+
+### 4. 关键系统参数开关生命周期管理
+ex:Theme_SwitchManagement rdf:type odl:Theme ;
+  rdfs:label "关键系统参数开关生命周期管理" ;
+  odl:description "生产系统当前存在大量历史开关配置，部分A类系统的开关数量达到了300+，且由于没有做生命周期管理，数量还在持续增长中。这些存量的开关代码堆积造成系统复杂度持续升高，提高了测试成本、代码迭代成本和生产运行风险。" ;
+  odl:themeCategory "运维效能类" ;
+  odl:themeFocus "开关管理、快模式、自动化下线" ;
+  odl:startTime "2025-11-01T00:00:00"^^xsd:dateTime ;
+  odl:plannedCompletionTime "2026-03-31T23:59:59"^^xsd:dateTime ;
+  odl:actualCompletionTime "2026-03-01T00:00:00"^^xsd:dateTime ;
+  odl:status "常态化" ;
+  odl:priority "普通" ;
+  odl:belongsTo ex:ODL_Project ;
+  odl:responsibleFor ex:Person_LiuLin ;
+  odl:contentDescription "基科完成weconf开关生命周期管理字段投产，完成开关生命周期管理'快模式'开发排期，财富侧初版已投产" ;
+  odl:effectiveness "本月新增临时开关6个，下线3个，均为agent自动完成。自动化管理取得成效，下线处理占比100%" ;
+  odl:progress "快模式已上线并全量验证，进入常态化管理" .
+
+ex:Theme_SwitchManagement odl:hasTool ex:Tool_Weconf .
+ex:Theme_SwitchManagement odl:hasIndicator ex:Indicator_SwitchAutoOfflinePercentage .

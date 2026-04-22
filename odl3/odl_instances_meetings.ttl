@@ -1,0 +1,204 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix odl: <http://webank.com/odl/ontology#> .
+@prefix ex: <http://webank.com/odl/instance#> .
+
+#############################################################
+# 会议实例
+#############################################################
+
+### ODL月度例会系列
+ex:Meeting_Monthly_20260206 rdf:type odl:Meeting ;
+  rdfs:label "2026年2月ODL月度会议" ;
+  odl:meetingTitle "2026年2月ODL月度会议" ;
+  odl:meetingType "月度例会" ;
+  odl:startTime "2026-02-06T14:00:00"^^xsd:dateTime ;
+  odl:endTime "2026-02-06T15:00:00"^^xsd:dateTime ;
+  odl:location "前海大厦9楼921会议室" ;
+  odl:host ex:Person_HeLiu ;
+  odl:recorder ex:Person_HeLiu ;
+  odl:meetingContent "ODL主题月度例会待办、ODL主题建设情况、运营管理例会ODL进展" ;
+  odl:meetingConclusion "ODL月度会应聚焦有价值的内容，避免无意义的形式主义，聚焦需讨论和决策的内容，如风险与阻碍、延期原因等。持续优化KBS知识库的使用过程。" ;
+  odl:discussionIn ex:ODL_Project ;
+  odl:hasDocument ex:Document_Minute_20260206 .
+
+ex:Meeting_Monthly_20260320 rdf:type odl:Meeting ;
+  rdfs:label "2026年3月ODL项目月会" ;
+  odl:meetingTitle "2026年3月ODL项目月会" ;
+  odl:meetingType "月度例会" ;
+  odl:startTime "2026-03-20T14:00:00"^^xsd:dateTime ;
+  odl:endTime "2026-03-20T15:00:00"^^xsd:dateTime ;
+  odl:location "前海大厦9楼921会议室" ;
+  odl:host ex:Person_HeLiu ;
+  odl:recorder ex:Person_HeLiu ;
+  odl:meetingContent "ODL主题月度例会待办、ODL主题建设情况、ODL项目管理智能体交互" ;
+  odl:meetingConclusion "AI原生方法将应用于项目管理中，特别是在结果管理方面，AI将辅助跟踪任务进展和质量。会议材料需要包含问题的原因分析、解决方案和所需资源。" ;
+  odl:hasTodo ex:Todo_ShareAINative ;
+  odl:hasTodo ex:Todo_ImproveMeetingTemplate ;
+  odl:hasTodo ex:Todo_CombiningWithZhixiao ;
+  odl:hasDocument ex:Document_Minute_20260320 .
+
+ex:Meeting_Monthly_20260410 rdf:type odl:Meeting ;
+  rdfs:label "2026年4月ODL月度运营报告讨论会议" ;
+  odl:meetingTitle "2026年4月ODL月度运营报告讨论会议" ;
+  odl:meetingType "月度例会" ;
+  odl:startTime "2026-04-10T14:00:00"^^xsd:dateTime ;
+  odl:endTime "2026-04-10T15:00:00"^^xsd:dateTime ;
+  odl:location "前海大厦9楼921会议室" ;
+  odl:host ex:Person_HeLiu ;
+  odl:hasParticipant ex:Person_JiangMin ;
+  odl:hasParticipant ex:Person_XuGaoQian ;
+  odl:hasParticipant ex:Person_Zhixiao ;
+  odl:discussionIn ex:ODL_Project ;
+  odl:hasDocument ex:Document_Minute_20260410 .
+
+### ODL周例会系列
+ex:Meeting_Weekly_20260304 rdf:type odl:Meeting ;
+  rdfs:label "ODL业务数据处理及任务管理规划" ;
+  odl:meetingTitle "ODL业务数据处理及任务管理规划" ;
+  odl:meetingType "周例会" ;
+  odl:startTime "2026-03-04T15:22:00"^^xsd:dateTime ;
+  odl:endTime "2026-03-04T15:43:00"^^xsd:dateTime ;
+  odl:meetingContent "工作任务安排、系统上线、数据管理、会议安排等多个方面" ;
+  odl:meetingConclusion "大数据团队计划在3月份处理完剩余的1000多个数据；各部门需重新打标关键任务；嘉伟团队的规范发文计划3月份按OKR流程发出；开关快模式3月中旬封网结束后上线；监控试点稽核本周上线" ;
+  odl:host ex:Person_HeLiu ;
+  odl:hasParticipant ex:Person_XuGaoQian ;
+  odl:hasParticipant ex:Person_ZhuJiaWei ;
+  odl:discussedIn ex:Theme_BigDataLeftShift ;
+  odl:discussedIn ex:Theme_ExceptionLocation ;
+  odl:discussedIn ex:Theme_SwitchManagement ;
+  odl:discussedIn ex:Theme_AIApplication ;
+  odl:hasDocument ex:Document_Weekly_20260304 .
+
+ex:Meeting_Weekly_20260311 rdf:type odl:Meeting ;
+  rdfs:label "ODL周会 2026年3月11日" ;
+  odl:meetingTitle "ODL周会 2026年3月11日" ;
+  odl:meetingType "周例会" ;
+  odl:startTime "2026-03-11T15:19:00"^^xsd:dateTime ;
+  odl:endTime "2026-03-11T15:40:00"^^xsd:dateTime ;
+  odl:meetingContent "业务数据处理、系统开关投产、批量数据上报等工作的进展、问题及后续计划" ;
+  odl:meetingConclusion "存款打标安排在6月份完成，财富使用Excel文本打标预计3月份完成；3月进行开发，4月上线对已打标的一级任务进行运营管控；IO资源分租比例已统计出来；快模式按计划下周二版本上线；监控试点稽核本周上线" ;
+  odl:host ex:Person_JiangMin ;
+  odl:recorder ex:Person_LiangYongFu ;
+  odl:discussedIn ex:Theme_BigDataLeftShift ;
+  odl:discussedIn ex:Theme_SwitchManagement ;
+  odl:discussedIn ex:Theme_BatchMonitoring ;
+  odl:hasDocument ex:Document_Weekly_20260311 .
+
+ex:Meeting_Weekly_20260325 rdf:type odl:Meeting ;
+  rdfs:label "ODL周会 2026年3月25日" ;
+  odl:meetingTitle "ODL周会 2026年3月25日" ;
+  odl:meetingType "周例会" ;
+  odl:startTime "2026-03-25T14:06:00"^^xsd:dateTime ;
+  odl:endTime "2026-03-25T14:37:00"^^xsd:dateTime ;
+  odl:meetingContent "业务数据、工作进度、会议组织形式以及工作模式优化" ;
+  odl:meetingConclusion "TSP预计本周到下周逐步进行灰度投产；断批跟临时统计预计4月底上线，目前进度40%；快模式已上线，周五进行试点系统；监控排期进度为56/79；批量数据量监控因CNC灰度指标检测需求可能延迟两周；探索使用AI工具提高工作模式效率" ;
+  odl:host ex:Person_HeLiu ;
+  odl:recorder ex:Person_LiangYongFu ;
+  odl:discussedIn ex:Theme_ExceptionLocation ;
+  odl:discussedIn ex:Theme_BigDataLeftShift ;
+  odl:discussedIn ex:Theme_SwitchManagement ;
+  odl:discussedIn ex:Theme_AIApplication ;
+  odl:discussedIn ex:Theme_BatchMonitoring ;
+  odl:hasDocument ex:Document_Weekly_20260325 .
+
+ex:Meeting_Weekly_20260401 rdf:type odl:Meeting ;
+  rdfs:label "月度例会待办事项讨论 2026年4月1日" ;
+  odl:meetingTitle "月度例会待办事项讨论 2026年4月1日" ;
+  odl:meetingType "周例会" ;
+  odl:startTime "2026-04-01T14:06:00"^^xsd:dateTime ;
+  odl:endTime "2026-04-01T14:33:00"^^xsd:dateTime ;
+  odl:meetingContent "月包反馈、待办事项跟进、项目管理应用、数据统计与汇报、系统问题解决以及后续会议安排" ;
+  odl:meetingConclusion "BDP凌晨问题已定位，是底层死锁问题；AI原生在项目管理中的应用需先想清楚应用场景和流程；TSP与开发和测试沟通进度稍慢，预计本周和下周完成；监控本月进展完成4点，推广排期率65%" ;
+  odl:host ex:Person_HeLiu ;
+  odl:hasTodo ex:Todo_AIUseCommunication ;
+  odl:hasTodo ex:Todo_AgentDiscussion ;
+  odl:hasTodo ex:Todo_ProjectManagementImprovement ;
+  odl:discussedIn ex:Theme_BigDataLeftShift ;
+  odl:discussedIn ex:Theme_ExceptionLocation ;
+  odl:discussedIn ex:Theme_AIApplication ;
+  odl:discussedIn ex:Theme_BatchMonitoring ;
+  odl:hasDocument ex:Document_Weekly_20260401 .
+
+ex:Meeting_Weekly_20260408 rdf:type odl:Meeting ;
+  rdfs:label "ODL工作进展及AI应用讨论 2026年4月8日" ;
+  odl:meetingTitle "ODL工作进展及AI应用讨论 2026年4月8日" ;
+  odl:meetingType "周例会" ;
+  odl:startTime "2026-04-08T14:07:00"^^xsd:dateTime ;
+  odl:endTime "2026-04-08T14:49:00"^^xsd:dateTime ;
+  odl:meetingContent "月报待办、监管规则一致性、各部门数据统计与分析、工作交接进展、AI应用以及待办事项" ;
+  odl:meetingConclusion "机科ODL接口人由嘉伟更换为玉如；新规范发文初稿已完成内部评审；重新打标系统完成所有打标工作；推广排期率为69%；监控算法对月趋势性数据不支持；不追求端到端的AI流程，先明确工作中可由AI完成的部分" ;
+  odl:host ex:Person_HeLiu ;
+  odl:hasParticipant ex:Person_XuGaoQian ;
+  odl:hasParticipant ex:Person_Zhixiao ;
+  odl:hasTodo ex:Todo_ComponentDataAcquisition .
+  odl:decisiionMadeIn ex:Theme_BigDataLeftShift .
+  odl:decisiionMadeIn ex:Theme_MeetingAgent .
+  odl:hasDocument ex:Document_Weekly_20260408 .
+
+### 数据提单流程及加白加黑方案讨论
+ex:Meeting_DataTicket_20260227 rdf:type odl:Meeting ;
+  rdfs:label "数据提单流程及大数据可运维性左移方案讨论" ;
+  odl:meetingTitle "数据提单流程及大数据可运维性左移方案讨论" ;
+  odl:meetingType "讨论会" ;
+  odl:startTime "2026-02-27T09:50:00"^^xsd:dateTime ;
+  odl:endTime "2026-02-27T10:11:00"^^xsd:dateTime ;
+  odl:meetingContent "数据提单、数据同步机制、数据加白加黑流程及人员沟通协调" ;
+  odl:meetingConclusion "容灾建设已取消，不再推进。仍需实现生产环境数据到准生产环境的同步，预计2026年5月系统可支持生产直接同步到准生产，在此之前需通过临时通路实现。'加白加黑'为大数据可运维性左移的临时技术措施。" ;
+  odl:host ex:Person_HeLiu ;
+  odl:recorder ex:Person_WuChao ;
+  odl:discussedIn ex:Theme_BigDataLeftShift ;
+  odl:hasDocument ex:Document_DataTicket_20260227 .
+
+### ODL评审邮件对比分析
+ex:Meeting_EmailReview_20260408 rdf:type odl:Meeting ;
+  rdfs:label "ODL评审邮件对比分析" ;
+  odl:meetingTitle "ODL评审邮件对比分析 2026年4月8日" ;
+  odl:meetingType "讨论会" ;
+  odl:startTime ""^^xsd:dateTime ;
+  odl:meetingContent "大数据左移评审邮件对比分析" ;
+  odl:host ex:Person_HeLiu ;
+  odl:discussedIn ex:Theme_BigDataLeftShift ;
+  odl:hasDocument ex:Document_EmailReview_20260408 .
+
+#############################################################
+# 会议人员参与关系设置
+#############################################################
+
+# 决策层常驻参与人员
+ex:Meeting_Monthly_20260206 odl:hasParticipant ex:Person_JiangMin .
+ex:Meeting_Monthly_20260206 odl:hasParticipant ex:Person_XuGaoQian .
+ex:Meeting_Monthly_20260206 odl:hasParticipant ex:Person_LiAnNan .
+ex:Meeting_Monthly_20260206 odl:hasParticipant ex:Person_Zhixiao .
+
+ex:Meeting_Monthly_20260320 odl:hasParticipant ex:Person_JiangMin .
+ex:Meeting_Monthly_20260320 odl:hasParticipant ex:Person_XuGaoQian .
+ex:Meeting_Monthly_20260320 odl:hasParticipant ex:Person_SunMingKun .
+ex:Meeting_Monthly_20260320 odl:hasParticipant ex:Person_Zhixiao .
+
+ex:Meeting_Monthly_20260410 odl:hasParticipant ex:Person_XuGaoQian .
+ex:Meeting_Monthly_20260410 odl:hasParticipant ex:Person_Zhixiao .
+
+# 周例会人员
+ex:Meeting_Weekly_20260304 odl:hasParticipant ex:Person_XuGaoQian .
+
+ex:Meeting_Weekly_20260311 odl:hasParticipant ex:Person_HeLiu .
+
+ex:Meeting_Weekly_20260325 odl:hasParticipant ex:Person_HeLiu .
+
+ex:Meeting_Weekly_20260401 odl:hasParticipant ex:Person_HeLiu .
+ex:Meeting_Weekly_20260401 odl:hasParticipant ex:Person_ZhuJiaWei .  # 工作交接讨论
+
+ex:Meeting_Weekly_20260408 odl:hasParticipant ex:Person_XuGaoQian .
+ex:Meeting_Weekly_20260408 odl:hasParticipant ex:Person_Zhixiao .
+ex:Meeting_Weekly_20260408 odl:hasParticipant ex:Person_YuRu .  # 工作交接相关
+
+# 会议间时序关系
+ex:Meeting_Monthly_20260206 odl:precedes ex:Meeting_Weekly_20260304 .
+ex:Meeting_Weekly_20260304 odl:precedes ex:Meeting_Weekly_20260311 .
+ex:Meeting_Weekly_20260311 odl:precedes ex:Meeting_Weekly_20260325 .
+ex:Meeting_Weekly_20260325 odl:precedes ex:Meeting_Monthly_20260320 .
+ex:Meeting_Monthly_20260320 odl:precedes ex:Meeting_Weekly_20260401 .
+ex:Meeting_Weekly_20260401 odl:precedes ex:Meeting_Weekly_20260408 .
+ex:Meeting_Weekly_20260408 odl:precedes ex:Meeting_Monthly_20260410 .

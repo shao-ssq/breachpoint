@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# 虚拟环境
+.venv/
+venv/
+env/
+.env
+
+# 工具输出
+breachpoint-out/
+*.html
+*.graphml
+*.cypher
+*.svg
+obsidian/
+wiki/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 测试覆盖率
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Claude Code / OMC 工具目录
+.claude/
+.omc/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# API 密钥（严禁提交）
+.env.local
+secrets.json
