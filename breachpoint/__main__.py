@@ -52,25 +52,9 @@ def _out_dir(root: Path) -> Path:
     return root / "breachpoint-out"
 
 
-def _community_labels(G, communities: dict, client) -> dict[int, str]:
-    """请求 LLM 为每个社区命名（2-4 个中文词）。"""
-    labels: dict[int, str] = {}
-    for cid, nodes in communities.items():
-        sample = [G.nodes[n].get("label", n) for n in nodes[:6]]
-        prompt = (
-            f"以下知识概念构成一个集群：{', '.join(sample)}。\n"
-            f"请用2-4个中文词为该集群命名，直接输出名称，不要任何其他内容。"
-        )
-        try:
-            resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=20,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            labels[cid] = resp.content[0].text.strip().strip('"')
-        except Exception:
-            labels[cid] = f"集群{cid}"
-    return labels
+def _community_labels(communities: dict) -> dict[int, str]:
+    """根据社区编号生成简单中文标签。"""
+    return {cid: f"社区{cid}" for cid in communities}
 
 
 # ── process / update ─────────────────────────────────────────────────────────
@@ -78,7 +62,6 @@ def _community_labels(G, communities: dict, client) -> dict[int, str]:
 def cmd_process(args: list[str], incremental: bool = False) -> None:
     from .detect import detect
     from .extract import extract
-    from .relate import relate
     from .store import load, file_hash
     from .build import build
     from .cluster import cluster
@@ -146,21 +129,6 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
         for edge in result["edges"]:
             store.add_edge_and_save(edge)
 
-        # 跨文档关系发现：基于已有节点，发现历史连接与潜在未来关联
-        new_nodes = [n for n in result["nodes"] if n["id"] in set(new_node_ids)]
-        if new_nodes and store.nodes:
-            existing = [n for n in store.nodes if n.get("source_file") != fpath]
-            if existing:
-                cross_edges = relate(
-                    new_nodes, existing, client, schema=schema, verbose=False
-                )
-                # 跨文档边逐条写入
-                for edge in cross_edges:
-                    store.add_edge_and_save(edge)
-                tokens["input"] += len(cross_edges) * 50
-                if cross_edges:
-                    print(f"+{len(cross_edges)} 跨文档连接", end=" ")
-
         store.mark_processed(rel, fhash)
         store.save()  # 确保 processed 标记落盘
         processed_count += 1
@@ -173,7 +141,7 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
     print(f"\nBuilding graph ({len(store)} nodes)…")
     G = build(store)
     communities = cluster(G)
-    labels = _community_labels(G, communities, client)
+    labels = _community_labels(communities)
     cohesion = score_all(G, communities)
     gods = god_nodes(G, top_n=10)
 

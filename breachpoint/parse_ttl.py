@@ -1,20 +1,19 @@
 """TTL/RDF 文件解析器 — BreachPoint 知识图谱构建。
 
-使用 rdflib 解析 Turtle 格式的 RDF 文件，提取：
-  - 所有命名个体（节点）
-  - 数据属性（节点属性，存为字段）
-  - 对象属性（边，节点间关系）
-  - 类层次结构
-  - 标注属性（标签、描述）
+两阶段处理：
+  1. rdflib 结构解析：提取所有三元组、类、个体、对象属性、数据属性（不遗漏）
+  2. LLM 信息补全：将节点原始属性拼接后交给 Sonnet，生成全面中文标签和摘要
 
 所有标签与关系名均输出为中文。
 
 公开 API:
-    parse_ttl(path) -> dict   — {nodes, edges}
+    parse_ttl(path, client, *, model) -> dict   — {nodes, edges}
 """
 from __future__ import annotations
+import json
 import re
 from pathlib import Path
+from typing import Any
 
 # ── 谓词 URI 本地名 → 中文关系名 ─────────────────────────────────────────────
 
@@ -127,7 +126,6 @@ _PREDICATE_CN: dict[str, str] = {
 # ── 节点类型 URI 本地名 → 中文类型名 ─────────────────────────────────────────
 
 _TYPE_CN: dict[str, str] = {
-    # OWL/RDF 结构类型
     "Class": "类",
     "ObjectProperty": "对象属性",
     "DatatypeProperty": "数据属性",
@@ -139,7 +137,6 @@ _TYPE_CN: dict[str, str] = {
     "Ontology": "本体",
     "Restriction": "约束",
     "NamedIndividual": "命名个体",
-    # 业务领域类型
     "Project": "项目",
     "Theme": "主题",
     "Task": "任务",
@@ -156,7 +153,6 @@ _TYPE_CN: dict[str, str] = {
     "Tag": "标签",
 }
 
-# 跳过这些命名空间的主体（纯模式层，不作为数据节点）
 _SCHEMA_NS = (
     "http://www.w3.org/2002/07/owl#",
     "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
@@ -164,19 +160,28 @@ _SCHEMA_NS = (
     "http://www.w3.org/2001/XMLSchema#",
 )
 
-# rdf:type 的对象属于这些命名空间时，不创建"类型为"边（避免冗余 OWL 结构边）
-_SKIP_TYPE_TARGETS = _SCHEMA_NS
+_SYSTEM_PROMPT = """\
+你是 RDF 知识图谱专家。给定从 TTL 文件解析出的一批节点原始数据（包含所有属性），\
+以及对应的 TTL 原文片段，请为每个节点生成：
+
+1. **label**：简洁中文标签（2-6字，优先使用已有中文名称）
+2. **summary**：全面中文摘要（一段话，必须涵盖节点的所有重要属性值，不得遗漏任何信息）
+
+规则：
+- 如果节点已有合适的中文名称，保留并使用它作为 label
+- summary 需将所有属性值用自然语言串联，避免直接罗列 key:value
+- 输出 JSON 数组，格式：[{"id": "节点id", "label": "中文标签", "summary": "全面中文摘要"}, ...]
+- 仅输出 JSON 数组，不输出任何其他内容
+"""
 
 
 def _local_name(uri: str) -> str:
-    """提取 URI 的本地名（# 或最后一个 / 之后的部分）。"""
     if "#" in uri:
         return uri.split("#")[-1]
     return uri.rstrip("/").split("/")[-1]
 
 
 def _camel_to_cn(name: str) -> str:
-    """将 CamelCase / underscore 标识符转为可读的空格分隔词组。"""
     s = re.sub(r"([A-Z][a-z]+)", r" \1", name)
     s = re.sub(r"([A-Z]+)(?=[A-Z][a-z])", r" \1", s)
     s = re.sub(r"_+", " ", s)
@@ -184,22 +189,18 @@ def _camel_to_cn(name: str) -> str:
 
 
 def _make_id(uri: str) -> str:
-    """从 URI 生成 ASCII slug ID。"""
     local = _local_name(uri)
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", local)
     return cleaned.strip("_").lower()[:80] or "node"
 
 
 def _get_label(graph, uri_ref, local: str) -> str:
-    """获取中文标签：优先 rdfs:label（中文），其次任意 label，最后拆分本地名。"""
     try:
         from rdflib.namespace import RDFS
-        # 优先 @zh 语言标注
         zh = [str(o) for o in graph.objects(uri_ref, RDFS.label)
               if hasattr(o, "language") and o.language in ("zh", "zh-CN", "zh-TW")]
         if zh:
             return zh[0]
-        # 任意标签
         any_label = [str(o) for o in graph.objects(uri_ref, RDFS.label)]
         if any_label:
             return any_label[0]
@@ -209,7 +210,6 @@ def _get_label(graph, uri_ref, local: str) -> str:
 
 
 def _get_comment(graph, uri_ref) -> str:
-    """获取 rdfs:comment 作为摘要。"""
     try:
         from rdflib.namespace import RDFS
         comments = [str(o) for o in graph.objects(uri_ref, RDFS.comment)]
@@ -219,9 +219,8 @@ def _get_comment(graph, uri_ref) -> str:
 
 
 def _get_node_type(graph, uri_ref) -> str:
-    """从 rdf:type 三元组确定节点中文类型名。"""
     try:
-        from rdflib.namespace import RDF, OWL, RDFS
+        from rdflib.namespace import RDF
         for t in graph.objects(uri_ref, RDF.type):
             t_local = _local_name(str(t))
             if t_local in _TYPE_CN:
@@ -232,22 +231,105 @@ def _get_node_type(graph, uri_ref) -> str:
 
 
 def _pred_to_cn(pred_uri: str) -> str:
-    """将谓词 URI 转为中文关系名。"""
     local = _local_name(pred_uri)
     return _PREDICATE_CN.get(local, _camel_to_cn(local) or local)
 
 
-def parse_ttl(path: str | Path) -> dict:
-    """解析 TTL/RDF 文件，返回 BreachPoint 格式的 {nodes, edges}。
+def _build_node_context(node: dict) -> str:
+    """将节点所有字段拼接为可读文本，供 LLM 参考。"""
+    parts = []
+    skip = {"id", "label", "type", "summary", "source_file"}
+    for k, v in node.items():
+        if k not in skip and v:
+            parts.append(f"{k}={v}")
+    return " | ".join(parts) if parts else ""
 
-    所有标签、关系名均为中文。
-    数据属性作为节点的额外字段存储。
-    对象属性作为边记录。
 
-    返回::
+def _enrich_with_llm(
+    nodes: list[dict],
+    ttl_text: str,
+    client: Any,
+    model: str,
+    batch_size: int = 15,
+) -> dict[str, dict]:
+    """调用 LLM 为节点补全中文标签和全面摘要。
+
+    Returns:
+        {node_id: {"label": "...", "summary": "..."}}
+    """
+    enriched: dict[str, dict] = {}
+
+    # 截取 TTL 原文（避免超长）
+    ttl_context = ttl_text[:6000] if len(ttl_text) > 6000 else ttl_text
+
+    for i in range(0, len(nodes), batch_size):
+        batch = nodes[i: i + batch_size]
+
+        # 构建节点描述（包含所有属性）
+        node_descs = []
+        for n in batch:
+            ctx = _build_node_context(n)
+            desc = {
+                "id": n["id"],
+                "当前标签": n.get("label", ""),
+                "节点类型": n.get("type", ""),
+                "已有摘要": n.get("summary", ""),
+                "所有属性": ctx,
+            }
+            node_descs.append(desc)
+
+        prompt = (
+            f"TTL 原文片段（供上下文参考）：\n```\n{ttl_context}\n```\n\n"
+            f"节点原始数据（共 {len(batch)} 个）：\n"
+            + json.dumps(node_descs, ensure_ascii=False, indent=2)
+        )
+
+        try:
+            resp = client.messages.create(
+                model=model,
+                max_tokens=4096,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = resp.content[0].text.strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+            items = json.loads(raw)
+            for item in items:
+                nid = item.get("id", "")
+                if nid:
+                    enriched[nid] = {
+                        "label": item.get("label", ""),
+                        "summary": item.get("summary", ""),
+                    }
+        except Exception as exc:
+            # LLM 失败时保留原始数据，不中断流程
+            import sys
+            print(f"[parse_ttl] LLM 补全批次 {i//batch_size+1} 失败: {exc}", file=sys.stderr)
+
+    return enriched
+
+
+def parse_ttl(
+    path: str | Path,
+    client: Any = None,
+    *,
+    model: str = "claude-sonnet-4-6",
+) -> dict:
+    """解析 TTL/RDF 文件，两阶段处理后返回 {nodes, edges}。
+
+    阶段一：rdflib 提取所有三元组（结构完整，零遗漏）
+    阶段二：LLM 补全中文标签和全面摘要（当 client 不为 None 时执行）
+
+    Args:
+        path:   TTL 文件路径
+        client: anthropic.Anthropic 实例（为 None 时跳过 LLM 补全）
+        model:  使用的模型 ID
+
+    Returns::
 
         {
-            "nodes": [{"id", "label", "type", "summary", "source_file", ...附加属性}],
+            "nodes": [{"id", "label", "type", "summary", "source_file", ...所有数据属性}],
             "edges": [{"source", "target", "relation", "confidence", "evidence"}],
         }
     """
@@ -259,12 +341,14 @@ def parse_ttl(path: str | Path) -> dict:
         raise ImportError("rdflib 未安装 — 请运行: pip install rdflib")
 
     path = Path(path)
+    ttl_text = path.read_text(encoding="utf-8", errors="ignore")
+
     g = rdflib.Graph()
     g.parse(str(path), format="turtle")
 
     source_file = str(path)
 
-    # ── 第一步：收集所有数据层主体（排除 OWL/RDF/RDFS/XSD 命名空间） ──────
+    # ── 阶段一：rdflib 结构解析 ────────────────────────────────────────────
 
     uri_subjects: set[str] = set()
     for s, _p, o in g:
@@ -273,10 +357,8 @@ def parse_ttl(path: str | Path) -> dict:
         if isinstance(o, URIRef) and not any(str(o).startswith(ns) for ns in _SCHEMA_NS):
             uri_subjects.add(str(o))
 
-    # ── 第二步：构建节点 ───────────────────────────────────────────────────
-
     nodes: list[dict] = []
-    uri_to_id: dict[str, str] = {}  # URI → slug id
+    uri_to_id: dict[str, str] = {}
     used_ids: set[str] = set()
 
     for uri_str in sorted(uri_subjects):
@@ -284,7 +366,6 @@ def parse_ttl(path: str | Path) -> dict:
         local = _local_name(uri_str)
         base_id = _make_id(uri_str)
 
-        # 处理 ID 碰撞
         node_id = base_id
         counter = 1
         while node_id in used_ids:
@@ -305,41 +386,34 @@ def parse_ttl(path: str | Path) -> dict:
             "source_file": source_file,
         }
 
-        # 收集所有字面量属性（数据属性）作为节点额外字段
+        # 收集所有字面量属性（数据属性）
         for pred, obj in g.predicate_objects(uri_ref):
             if not isinstance(obj, Literal):
                 continue
             pred_local = _local_name(str(pred))
             if pred_local in ("label", "comment"):
-                continue  # 已作为 label/summary 处理
+                continue
             cn_key = _PREDICATE_CN.get(pred_local, _camel_to_cn(pred_local) or pred_local)
             node[cn_key] = str(obj)
 
         nodes.append(node)
 
-    # ── 第三步：构建边（对象属性三元组） ──────────────────────────────────
-
+    # 边：对象属性三元组
     edges: list[dict] = []
     seen_edges: set[tuple] = set()
-
-    # 跳过纯字面量谓词和 rdfs:label/comment（已处理为节点属性）
     SKIP_PREDS = {str(RDFS.label), str(RDFS.comment)}
+    _SKIP_TYPE_TARGETS = _SCHEMA_NS
 
     for s, p, o in g:
         if not isinstance(s, URIRef) or not isinstance(o, URIRef):
             continue
         if isinstance(o, Literal):
             continue
-
         s_str, p_str, o_str = str(s), str(p), str(o)
-
-        # 排除模式层主体/宾体
         if any(s_str.startswith(ns) for ns in _SCHEMA_NS):
             continue
         if p_str in SKIP_PREDS:
             continue
-
-        # rdf:type：若目标在 OWL/RDF/RDFS 命名空间则跳过（纯结构信息）
         if p_str == str(RDF.type) and any(o_str.startswith(ns) for ns in _SKIP_TYPE_TARGETS):
             continue
 
@@ -364,5 +438,23 @@ def parse_ttl(path: str | Path) -> dict:
             "confidence": "EXTRACTED",
             "evidence": f"三元组：{src_label} → {relation} → {tgt_label}",
         })
+
+    # ── 阶段二：LLM 补全中文标签和摘要 ────────────────────────────────────
+
+    if client is not None and nodes:
+        enriched = _enrich_with_llm(nodes, ttl_text, client, model)
+        for node in nodes:
+            nid = node["id"]
+            if nid in enriched:
+                if enriched[nid].get("label"):
+                    node["label"] = enriched[nid]["label"]
+                if enriched[nid].get("summary"):
+                    node["summary"] = enriched[nid]["summary"]
+        # 同步更新边中的 evidence（使用新标签）
+        id_to_label = {n["id"]: n["label"] for n in nodes}
+        for edge in edges:
+            src_lbl = id_to_label.get(edge["source"], edge["source"])
+            tgt_lbl = id_to_label.get(edge["target"], edge["target"])
+            edge["evidence"] = f"三元组：{src_lbl} → {edge['relation']} → {tgt_lbl}"
 
     return {"nodes": nodes, "edges": edges}

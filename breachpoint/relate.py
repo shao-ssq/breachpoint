@@ -15,8 +15,6 @@ import re
 import sys
 from typing import Any
 
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
-
 DEFAULT_BATCH_SIZE = 20   # existing nodes per LLM call
 DEFAULT_MAX_ROUNDS = 0    # 0 = unlimited (process all batches)
 
@@ -112,7 +110,7 @@ def relate(
     existing_nodes: list[dict],
     client: Any,
     *,
-    model: str = DEFAULT_MODEL,
+    model: str = "claude-sonnet-4-6",
     batch_size: int = DEFAULT_BATCH_SIZE,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     verbose: bool = False,

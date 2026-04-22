@@ -26,7 +26,7 @@ def extract(path: str | Path, client=None, *, model: str = "", schema=None) -> d
         )
 
     from .parse_ttl import parse_ttl
-    result = parse_ttl(path)
+    result = parse_ttl(path, client)
     return {
         "nodes": result["nodes"],
         "edges": result["edges"],
