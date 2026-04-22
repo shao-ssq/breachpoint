@@ -100,23 +100,17 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
     # ── Phase 0: detect documents ────────────────────────────────────────────
     manifest = detect(path)
     files = manifest["files"]
-    print(f"Found {manifest['total_files']} documents (~{manifest['total_words']:,} words)")
+    print(f"发现 {manifest['total_files']} 个 TTL/RDF 文件（约 {manifest['total_triples']:,} 行三元组）")
     if not files:
-        print("No documents found.")
+        print("未找到 TTL 文件，请确认目录中存在 .ttl / .turtle / .n3 文件。")
         return
 
-    # ── Phase 1: auto-generate schema from document sample ────────────────────
-    print("Generating schema from document sample…", end=" ", flush=True)
+    # ── Phase 1: 生成 schema（直接从 TTL 本体结构，无 LLM） ─────────────────
+    print("从 TTL 本体结构生成 schema…", end=" ", flush=True)
     from .schema_gen import generate_schema as _gen_schema
-    try:
-        schema = _gen_schema(manifest, client)
-    except Exception as e:
-        print(f"✗ {e}")
-        sys.exit(1)
+    schema = _gen_schema(manifest)
     node_types = [t["type"] for t in schema.get("nodes", [])]
-    edge_types = [t["relation"] for t in schema.get("edges", [])]
-    print(f"✓ {len(node_types)} node types: {', '.join(node_types)}")
-    print(f"  {len(edge_types)} edge types: {', '.join(edge_types)}")
+    print(f"  节点类型：{', '.join(node_types)}")
 
     # ── Phase 2: extract & relate ────────────────────────────────────────────
     store = load(out)
