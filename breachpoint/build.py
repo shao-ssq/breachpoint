@@ -1,6 +1,6 @@
-"""Assemble a NetworkX graph from store extraction dict.
+"""从 store 或 extraction dict 组装 NetworkX 图。
 
-Public API:
+公开 API:
     build_from_json(extraction) -> nx.Graph
     build(store)                -> nx.Graph
 """
@@ -13,8 +13,13 @@ from .store import Store
 
 
 def build_from_json(extraction: dict, *, directed: bool = False) -> nx.Graph:
-    """Build a NetworkX graph from an extraction dict {nodes, edges}."""
+    """从 extraction dict {nodes, edges} 构建 NetworkX 图。
+
+    无向图中边属性会额外保存 _src/_tgt 以保留原始方向信息。
+    端点不存在的悬空边（stub 未补全）会被静默跳过。
+    """
     errors = validate_extraction(extraction)
+    # 过滤悬空边警告（stub 节点尚未补全属正常情况）
     real_errors = [e for e in errors if "does not match any node id" not in e]
     if real_errors:
         print(f"[breachpoint] extraction warning: {real_errors[0]}", file=sys.stderr)
@@ -39,5 +44,5 @@ def build_from_json(extraction: dict, *, directed: bool = False) -> nx.Graph:
 
 
 def build(store: Store, *, directed: bool = False) -> nx.Graph:
-    """Build a NetworkX graph from a Store instance."""
+    """从 Store 实例构建 NetworkX 图。"""
     return build_from_json(store.to_extraction(), directed=directed)

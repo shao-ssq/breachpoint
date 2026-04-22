@@ -125,7 +125,7 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
     communities = cluster(G)
     labels = _community_labels(communities)
     cohesion = score_all(G, communities)
-    gods = god_nodes(G, top_n=10)
+    gods = god_nodes(G, top_n=10, communities=communities)
 
     report = generate(G, communities, labels, root=str(path), tokens={"input": 0, "output": 0})
     (out / "GRAPH_REPORT.md").write_text(report, encoding="utf-8")

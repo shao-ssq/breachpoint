@@ -1,7 +1,7 @@
-"""Community detection for BreachPoint (adapted from graphify).
+"""社区检测 — BreachPoint。
 
-Public API:
-    cluster(G) -> dict[int, list[str]]   community_id -> [node_ids]
+公开 API:
+    cluster(G) -> dict[int, list[str]]    社区ID → 节点ID列表
     score_all(G, communities) -> dict[int, float]
     cohesion_score(G, nodes) -> float
 """
@@ -17,6 +17,11 @@ def _suppress():
 
 
 def _partition(G: nx.Graph) -> dict[str, int]:
+    """对图进行分区，返回 {节点ID: 社区ID}。
+
+    优先使用 Leiden（graspologic），失败则降级到 Louvain（networkx），
+    再失败则每个节点独立成一个社区。
+    """
     try:
         from graspologic.partition import leiden
         old_err = sys.stderr
@@ -41,6 +46,12 @@ def _partition(G: nx.Graph) -> dict[str, int]:
 
 
 def cluster(G: nx.Graph) -> dict[int, list[str]]:
+    """对图进行社区检测，返回按社区规模降序编号的结果。
+
+    孤立节点（度为0）各自单独成一个社区，避免污染算法输入。
+    超大社区（超过 max(10, 总节点数/4) 个节点）会额外再切分一次。
+    最终社区按规模降序重新编号，社区0最大。
+    """
     if G.number_of_nodes() == 0:
         return {}
     Gu = G.to_undirected() if G.is_directed() else G
@@ -60,7 +71,7 @@ def cluster(G: nx.Graph) -> dict[int, list[str]]:
         for node, pid in raw.items():
             mapping.setdefault(pid, []).append(node)
         for nodes in mapping.values():
-            # Split oversized communities
+            # 超大社区再切分一次（仅一层递归）
             if len(nodes) > max(10, G.number_of_nodes() // 4):
                 sub2 = Gu.subgraph(nodes)
                 raw2 = _partition(sub2)
@@ -74,12 +85,13 @@ def cluster(G: nx.Graph) -> dict[int, list[str]]:
                 communities[cid] = nodes
                 cid += 1
 
-    # Re-number by descending size
+    # 按社区规模降序重新编号
     sorted_ids = sorted(communities, key=lambda k: len(communities[k]), reverse=True)
     return {new_id: communities[old_id] for new_id, old_id in enumerate(sorted_ids)}
 
 
 def cohesion_score(G: nx.Graph, nodes: list[str]) -> float:
+    """计算社区内聚度：实际边数 / 可能边数（无向）。"""
     if len(nodes) < 2:
         return 1.0
     sub = G.subgraph(nodes)
@@ -89,4 +101,5 @@ def cohesion_score(G: nx.Graph, nodes: list[str]) -> float:
 
 
 def score_all(G: nx.Graph, communities: dict[int, list[str]]) -> dict[int, float]:
+    """计算所有社区的内聚度得分。"""
     return {cid: cohesion_score(G, nodes) for cid, nodes in communities.items()}
