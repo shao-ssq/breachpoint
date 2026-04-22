@@ -7,10 +7,11 @@
 所有标签与关系名均输出为中文。
 
 公开 API:
-    parse_ttl(path, client, *, model) -> dict   — {nodes, edges}
+    parse_ttl(path, client) -> dict   — {nodes, edges}
 """
 from __future__ import annotations
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -285,7 +286,7 @@ def _enrich_with_llm(
 
         try:
             resp = client.messages.create(
-                model="claude-sonnet-4-6",
+                model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
                 max_tokens=4096,
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}],
