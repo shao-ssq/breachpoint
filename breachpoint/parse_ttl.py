@@ -249,7 +249,6 @@ def _enrich_with_llm(
     nodes: list[dict],
     ttl_text: str,
     client: Any,
-    model: str,
     batch_size: int = 15,
 ) -> dict[str, dict]:
     """调用 LLM 为节点补全中文标签和全面摘要。
@@ -286,7 +285,7 @@ def _enrich_with_llm(
 
         try:
             resp = client.messages.create(
-                model=model,
+                model="claude-sonnet-4-6",
                 max_tokens=4096,
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}],
@@ -313,8 +312,6 @@ def _enrich_with_llm(
 def parse_ttl(
     path: str | Path,
     client: Any = None,
-    *,
-    model: str = "claude-sonnet-4-6",
 ) -> dict:
     """解析 TTL/RDF 文件，两阶段处理后返回 {nodes, edges}。
 
@@ -442,7 +439,7 @@ def parse_ttl(
     # ── 阶段二：LLM 补全中文标签和摘要 ────────────────────────────────────
 
     if client is not None and nodes:
-        enriched = _enrich_with_llm(nodes, ttl_text, client, model)
+        enriched = _enrich_with_llm(nodes, ttl_text, client)
         for node in nodes:
             nid = node["id"]
             if nid in enriched:
