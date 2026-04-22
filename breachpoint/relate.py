@@ -48,7 +48,7 @@ _SYSTEM = """\
 
 def _format_nodes(nodes: list[dict], label: str) -> str:
     lines = [f"## {label}"]
-    skip = {"source_file", "id"}
+    skip = {"_source", "id"}
     for n in nodes:
         props = " | ".join(
             f"{k}={v}" for k, v in n.items()
@@ -91,11 +91,11 @@ def relate(
     if not new_nodes or not existing_nodes:
         return []
 
-    current_source = new_nodes[0].get("source_file", "")
-    # 排除同文档节点和 stub 节点（source_file 为空）
+    current_source = new_nodes[0].get("_source", "")
+    # 排除同文档节点和 stub 节点
     existing_other = [
         n for n in existing_nodes
-        if n.get("source_file") and n.get("source_file") != current_source
+        if n.get("_source") and n.get("_source") != current_source
     ]
     if not existing_other:
         return []

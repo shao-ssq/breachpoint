@@ -94,7 +94,7 @@ def _run_claude(prompt: str) -> str:
 def extract(path: str | Path, client=None) -> dict:
     """解析 TTL/RDF 文件，通过 LLM 提取节点和边。
 
-    外部引用节点以 stub 形式返回（source_file 为空），
+    外部引用节点以 stub 形式返回，
     待其所在文件被处理时 store 会自动合并补全。
 
     Raises:
@@ -105,7 +105,6 @@ def extract(path: str | Path, client=None) -> dict:
         raise ValueError(f"不支持的文件格式：{path.suffix}。breachpoint 当前仅支持 TTL/RDF 文件。")
 
     ttl_content = path.read_text(encoding="utf-8", errors="ignore")
-    source_file = str(path)
 
     try:
         raw = _run_claude(_PROMPT.format(ttl_content=ttl_content))
@@ -121,10 +120,6 @@ def extract(path: str | Path, client=None) -> dict:
     edges: list[dict] = data.get("edges", [])
     external_refs: list[str] = data.get("external_refs", [])
 
-    # 注入 source_file
-    for node in nodes:
-        node["source_file"] = source_file
-
     # 为外部引用节点创建 stub，store 后续 merge 会补全
     defined_ids = {n["id"] for n in nodes}
     for ref_id in external_refs:
@@ -134,7 +129,6 @@ def extract(path: str | Path, client=None) -> dict:
                 "label": ref_id,
                 "type": "",
                 "summary": "",
-                "source_file": "",  # 空表示 stub
             })
             defined_ids.add(ref_id)
 

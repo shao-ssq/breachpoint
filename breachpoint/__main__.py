@@ -96,7 +96,7 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
         new_real_nodes: list[dict] = []
         for node in result["nodes"]:
             store.add_node_and_save(node)
-            if node.get("source_file"):   # 非 stub
+            if node.get("summary"):   # 非 stub（stub 的 summary 为空）
                 new_real_nodes.append(node)
 
         # 写入文档内部边
