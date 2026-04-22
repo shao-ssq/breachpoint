@@ -31,30 +31,17 @@ import os
 import sys
 from pathlib import Path
 
-
-# ── helpers ──────────────────────────────────────────────────────────────────
-
-def _get_client():
-    try:
-        import anthropic
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        base_url = os.environ.get("ANTHROPIC_BASE_URL")
-        kwargs: dict = {"api_key": api_key} if api_key else {}
-        if base_url:
-            kwargs["base_url"] = base_url
-        return anthropic.Anthropic(**kwargs)
-    except ImportError:
-        print("error: anthropic package not found — pip install anthropic", file=sys.stderr)
-        sys.exit(1)
+# Allow running as script (PyCharm debugger) without package context
+if __package__ is None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def _out_dir(root: Path) -> Path:
     return root / "breachpoint-out"
 
 
-def _community_labels(communities: dict) -> dict[int, str]:
-    """根据社区编号生成简单中文标签。"""
-    return {cid: f"社区{cid}" for cid in communities}
+def _community_labels(communities: dict) -> dict:
+    return {cid: f"社区 {cid}" for cid in communities}
 
 
 # ── process / update ─────────────────────────────────────────────────────────
@@ -62,6 +49,7 @@ def _community_labels(communities: dict) -> dict[int, str]:
 def cmd_process(args: list[str], incremental: bool = False) -> None:
     from .detect import detect
     from .extract import extract
+    from .relate import relate
     from .store import load, file_hash
     from .build import build
     from .cluster import cluster
@@ -71,12 +59,8 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
     from .analyze import god_nodes
 
     path = Path(args[0]) if args else Path(".")
-    do_wiki = False
-    for i, a in enumerate(args):
-        if a == "--wiki":
-            do_wiki = True
+    do_wiki = "--wiki" in args
 
-    client = _get_client()
     out = _out_dir(path)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -88,16 +72,8 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
         print("未找到 TTL 文件，请确认目录中存在 .ttl / .turtle / .n3 文件。")
         return
 
-    # ── Phase 1: 生成 schema（直接从 TTL 本体结构，无 LLM） ─────────────────
-    print("从 TTL 本体结构生成 schema…", end=" ", flush=True)
-    from .schema_gen import generate_schema as _gen_schema
-    schema = _gen_schema(manifest)
-    node_types = [t["type"] for t in schema.get("nodes", [])]
-    print(f"  节点类型：{', '.join(node_types)}")
-
-    # ── Phase 2: extract & relate ────────────────────────────────────────────
+    # ── Phase 1: extract & relate ────────────────────────────────────────────
     store = load(out)
-    tokens = {"input": 0, "output": 0}
     processed_count = 0
 
     for i, finfo in enumerate(files, 1):
@@ -111,28 +87,34 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
         print(f"[{i}/{len(files)}] {rel}", end=" ", flush=True)
 
         try:
-            result = extract(fpath, client, schema=schema)
+            result = extract(fpath)
         except Exception as e:
             print(f"  ✗ {e}")
             continue
 
-        tokens["input"] += result["input_tokens"]
-        tokens["output"] += result["output_tokens"]
-
-        # 逐节点写入（每生成一个立即落盘）
-        new_node_ids: list[str] = []
+        # 写入节点（含 stub）
+        new_real_nodes: list[dict] = []
         for node in result["nodes"]:
-            if store.add_node_and_save(node):
-                new_node_ids.append(node["id"])
+            store.add_node_and_save(node)
+            if node.get("source_file"):   # 非 stub
+                new_real_nodes.append(node)
 
-        # 逐边写入（文档内部边）
+        # 写入文档内部边
         for edge in result["edges"]:
             store.add_edge_and_save(edge)
 
+        # 跨文档关系发现（仅在已有其他文件节点时执行）
+        if new_real_nodes and len(store) > len(new_real_nodes):
+            cross_edges = relate(new_real_nodes, store.nodes)
+            for edge in cross_edges:
+                store.add_edge_and_save(edge)
+            if cross_edges:
+                print(f"  +{len(cross_edges)} 跨文档边", end=" ", flush=True)
+
         store.mark_processed(rel, fhash)
-        store.save()  # 确保 processed 标记落盘
+        store.save()
         processed_count += 1
-        print(f"  ✓ {len(result['nodes'])} 个节点")
+        print(f"  ✓ {len(new_real_nodes)} 个节点")
 
     if processed_count == 0 and incremental:
         print("Nothing changed — graph is up to date.")
@@ -145,7 +127,7 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
     cohesion = score_all(G, communities)
     gods = god_nodes(G, top_n=10)
 
-    report = generate(G, communities, labels, root=str(path), tokens=tokens)
+    report = generate(G, communities, labels, root=str(path), tokens={"input": 0, "output": 0})
     (out / "GRAPH_REPORT.md").write_text(report, encoding="utf-8")
     to_json(G, communities, out / "graph.json")
     to_html(G, communities, out / "graph.html", community_labels=labels)
@@ -165,7 +147,6 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
     print(f"\nDone. {G.number_of_nodes()} nodes · {G.number_of_edges()} edges · {len(communities)} communities")
     print(f"  {out}/graph.html")
     print(f"  {out}/GRAPH_REPORT.md")
-    print(f"LLM tokens: {tokens['input']:,} in / {tokens['output']:,} out")
 
 
 # ── query ─────────────────────────────────────────────────────────────────────
@@ -515,27 +496,31 @@ def cmd_install() -> None:
 def main() -> None:
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
-        print("Usage: breachpoint <command> [options]")
-        print()
-        print("Commands:")
-        print("  process <path>              analyse all documents and build knowledge graph")
-        print("    --wiki                      also generate wiki/ articles")
-        print("  update  <path>              process only new/changed documents")
-        print("    --wiki                      also generate wiki/ articles")
-        print("  query   <question> [path]   search the graph by keyword")
-        print("  explain <label> [path]      describe a node and its connections")
-        print("  path    <A> <B> [path]      shortest path between two concepts")
-        print("  watch   <path>              watch for document changes")
-        print("  export  <format> [path]     export graph (cypher/graphml/svg/obsidian/json)")
-        print("  cluster-only <path>         re-cluster existing graph, no re-extraction")
-        print("  hook    install             install git post-commit hook")
-        print("          uninstall           remove git hooks")
-        print("          status              check hook status")
-        print("  install                     register skill in Claude Code")
-        return
-
-    cmd = args[0]
-    rest = args[1:]
+        if not args:
+            cmd = "process"
+            rest = ["./odl3"]
+        else:
+            print("Usage: breachpoint <command> [options]")
+            print()
+            print("Commands:")
+            print("  process <path>              analyse all documents and build knowledge graph")
+            print("    --wiki                      also generate wiki/ articles")
+            print("  update  <path>              process only new/changed documents")
+            print("    --wiki                      also generate wiki/ articles")
+            print("  query   <question> [path]   search the graph by keyword")
+            print("  explain <label> [path]      describe a node and its connections")
+            print("  path    <A> <B> [path]      shortest path between two concepts")
+            print("  watch   <path>              watch for document changes")
+            print("  export  <format> [path]     export graph (cypher/graphml/svg/obsidian/json)")
+            print("  cluster-only <path>         re-cluster existing graph, no re-extraction")
+            print("  hook    install             install git post-commit hook")
+            print("          uninstall           remove git hooks")
+            print("          status              check hook status")
+            print("  install                     register skill in Claude Code")
+            return
+    else:
+        cmd = args[0]
+        rest = args[1:]
 
     if cmd == "process":
         cmd_process(rest, incremental=False)
