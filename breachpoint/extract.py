@@ -22,94 +22,49 @@ _BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "")
 _MODEL = os.environ.get("ANTHROPIC_MODEL", os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-20250514"))
 
 _PROMPT = """\
-你是知识图谱提取专家，专门从 TTL/RDF 本体中提取完整的两层知识图谱。
+你是知识图谱提取专家，专门从 TTL/RDF 本体文件中提取结构化的知识图谱（节点和边）。
 
-【提取目标：两层并行提取】
+【提取目标】
+提取 TTL 文件中的每一个具名资源作为节点，统一处理。
 
-═══════════════════════════════════════
-第一层：实例层（Instance Level）
-═══════════════════════════════════════
-提取具体的实例个体（具名实例），例如：
-- odl:Theme（主题任务）的实例
-- odl:Person（人员）的实例
-- odl:Project（项目）的实例
-- odl:Department（部门）的实例
-- odl:Tool（工具/系统）的实例
-- odl:Indicator（指标）的实例
-- odl:Risk（风险）的实例
-- odl:Milestone（里程碑）的实例
-
-═══════════════════════════════════════
-第二层：本体层（Ontology Level）
-═══════════════════════════════════════
-提取类和属性的定义声明：
-- owl:Class                → 节点类型："本体类"
-- owl:ObjectProperty       → 节点类型："对象属性"
-- owl:DatatypeProperty     → 节点类型："数据属性"
-- owl:AnnotationProperty   → 节点类型："注解属性"
-
-跳过（不提取为节点）：
-- owl:Ontology 声明本身（但 owl:imports 的目标要计入 external_refs）
-- owl:Restriction（匿名限制节点）
-- rdf:Property、rdfs:Class
+节点包括：
+- owl:Class、owl:NamedIndividual、以及任何有 rdf:type 声明的资源
+- 有数据属性（字面量）或对象属性的资源
+- 被其他资源引用的资源（即使本文件未声明，也作为 stub 节点保留）
 
 【强制语言要求】
-- 所有 label、summary、relation 字段必须使用中文（汉字），禁止使用任何英文单词或短语。
-- summary 必须是一句完整的中文句子（30-80字），不能是英文单词的直译堆砌。
-- relation 必须是中文动词短语，如"属于"、"包含"、"继承自"，禁止使用英文动词如"has"、"contains"。
-- 如果原始 TTL 中的英文术语没有通用中文译名，请在保留英文缩写后加中文说明，如"CTSP调度系统"。
+- 所有 label、summary、relation、type 字段必须使用中文（汉字），禁止任何英文单词或短语。
+- summary 必须是一句完整的中文句子（30-80字），不是碎片化关键词。
+- relation 必须是中文动词短语，禁止英文动词。
+- 没有通用中文译名的英文术语：保留缩写后加中文说明，如"CTSP调度系统"。
 
 【节点提取规则】
-- id：URI 本地名（# 或最后一个 / 之后的部分，保留原文）
-- label：rdfs:label 的值（优先中文），无则从 id 推导简洁中文名
-- type：按上方两层分类填写中文类型名
-- summary：综合该节点所有声明写一句完整中文描述（30-80字）
+- id：URI 本地名（# 或最后一个 / 之后的部分）
+- label：rdfs:label 的中文值优先；无则从 id 推导简洁中文名
+- type：根据该资源在 TTL 中的 rdf:type / 使用模式自动推断一个中文类型名。
+  可以是"本体类"、"对象属性"、"系统"、"枚举"、"业务流程"等具体类型，不要用"节点"这种泛泛的词。
+- summary：综合该资源的所有声明写一句完整中文描述（30-80字）
 
-实例节点额外规则：
-- 所有数据属性（字面量）以中文字段名扁平保存在节点顶层，例如：
-    odl:startTime                → "开始时间"
-    odl:status                   → "状态"
-    odl:priority                 → "优先级"
-    odl:description              → "描述"
-    odl:progress                 → "进度"
-    odl:riskLevel                → "风险等级"
-    odl:departmentName           → "部门名称"
-    odl:responsibility           → "职责"
-    odl:themeCategory            → "主题类别"
-    odl:themeFocus               → "关注领域"
-    odl:contentDescription       → "内容描述"
-    odl:effectiveness            → "成效"
-    odl:savedManMonths           → "节省人月"
-    odl:efficiencyGain           → "效率提升"
-    odl:progressPercentage       → "进度百分比"
-    odl:plannedCompletionTime    → "计划完成时间"
-    odl:actualCompletionTime     → "实际完成时间"
+如果一个资源有数据属性（字面量值），以中文字段名扁平展开到节点顶层：
+  - 从英文属性名推导简洁中文，如 startTime → "开始时间"、status → "状态"
+  - 无法推断的保留英文原名并加中文括号标注，如 "progressPercentage（进度百分比）"
 
 【边提取规则】
-relation 字段必须使用中文动词短语，禁止任何英文单词。
-  例："属于"、"负责"、"使用工具"、"包含"、"继承自"、"属性域为"
-
-实例层边（对象属性三元组）：
-- 提取所有目标值为 URI 的属性
-- 例：odl:belongsTo → "属于"、odl:responsibleFor → "负责"、odl:hasTool → "使用工具"、odl:contains → "包含"
-
-本体层边（结构关系，重点提取——这是跨文档隐藏关联的来源）：
-- rdfs:subClassOf     → "继承自"
-- rdfs:domain         → "属性域为"
-- rdfs:range          → "属性值域为"
-- owl:imports         → "导入"
-- owl:equivalentClass → "等价于"
-- rdfs:subPropertyOf  → "子属性为"
-- owl:inverseOf       → "逆属性为"
+- 提取所有对象属性三元组（目标值为 URI 的属性）
+- 提取所有结构关系（rdfs:subClassOf、rdfs:domain、rdfs:range、owl:imports、owl:equivalentClass 等）
+- relation 从属性名推导中文动词短语，如：
+    belongsTo → "属于"、responsibleFor → "负责"、hasTool → "使用工具"
+    subClassOf → "继承自"、domain → "属性域为"、range → "属性值域为"
+    imports → "导入"、equivalentClass → "等价于"、inverseOf → "逆属性为"
+    disjointWith → "互斥于"、subPropertyOf → "子属性为"
 
 通用边字段：
 - source / target：节点的 id（本地名）
-- confidence：EXTRACTED
-- evidence：一句中文说明此关系
+- confidence：EXTRACTED（TTL中显式声明）或 INFERRED（由结构推断）
+- evidence：一句中文说明此关系的依据
 
 【外部引用】
 列出所有在边中被引用、但本文件中未完整定义的节点 id（本地名）。
-包括：跨文件实例引用、被继承的父类、属性域/值域中的类、owl:imports 的目标本体。
 
 只输出 JSON，不输出任何其他内容，格式如下：
   nodes: 数组，每个元素包含 id, label, type, summary 及附加中文字段
