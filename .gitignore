@@ -17,7 +17,7 @@ env/
 .env
 
 # 工具输出
-breachpoint-out/
+odl3/breachpoint-out/
 *.html
 *.graphml
 *.cypher

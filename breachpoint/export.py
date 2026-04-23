@@ -75,7 +75,7 @@ def to_json(
 def _html_styles() -> str:
     return """<style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #0f0f1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; height: 100vh; overflow: hidden; }
+  body { background: #0f0f1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; display: flex; height: 100vh; overflow: hidden; }
   #graph { flex: 1; }
   #sidebar { width: 280px; background: #1a1a2e; border-left: 1px solid #2a2a4e; display: flex; flex-direction: column; overflow: hidden; }
   #search-wrap { padding: 12px; border-bottom: 1px solid #2a2a4e; }
@@ -89,18 +89,23 @@ def _html_styles() -> str:
   #info-content { font-size: 13px; color: #ccc; line-height: 1.6; }
   #info-content .field { margin-bottom: 5px; }
   #info-content .field b { color: #e0e0e0; }
+  #info-content .summary { color: #aaa; font-size: 12px; margin-bottom: 5px; }
   #info-content .empty { color: #555; font-style: italic; }
   .neighbor-link { display: block; padding: 2px 6px; margin: 2px 0; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid #333; }
   .neighbor-link:hover { background: #2a2a4e; }
-  #neighbors-list { max-height: 160px; overflow-y: auto; margin-top: 4px; }
+  #neighbors-list { max-height: 140px; overflow-y: auto; margin-top: 4px; }
   #legend-wrap { flex: 1; overflow-y: auto; padding: 12px; }
   #legend-wrap h3 { font-size: 13px; color: #aaa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .legend-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; border-radius: 4px; font-size: 12px; }
-  .legend-item:hover { background: #2a2a4e; padding-left: 4px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; cursor: pointer; border-radius: 4px; font-size: 12px; }
+  .legend-item:hover { background: #2a2a4e; }
   .legend-item.dimmed { opacity: 0.35; }
   .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
   .legend-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .legend-count { color: #666; font-size: 11px; }
+  #edge-legend { padding: 10px 14px; border-top: 1px solid #2a2a4e; font-size: 11px; color: #666; }
+  #edge-legend div { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .el-solid { width: 24px; height: 2px; background: #e0e0e0; opacity: 0.7; }
+  .el-dashed { width: 24px; height: 2px; background: repeating-linear-gradient(90deg,#e0e0e0 0,#e0e0e0 4px,transparent 4px,transparent 8px); opacity: 0.35; }
   #stats { padding: 10px 14px; border-top: 1px solid #2a2a4e; font-size: 11px; color: #555; }
 </style>"""
 
@@ -161,12 +166,11 @@ function showInfo(nodeId) {{
   }}).join('');
   document.getElementById('info-content').innerHTML = `
     <div class="field"><b>${{esc(n.label)}}</b></div>
-    <div class="field">Type: ${{esc(n._type || '—')}}</div>
-    <div class="field">Community: ${{esc(n._community_name)}}</div>
-    <div class="field">Source: ${{esc(n._source_file || '—')}}</div>
-    <div class="field">Degree: ${{n._degree}}</div>
-    ${{n._summary ? `<div class="field" style="color:#aaa;font-size:11px;margin-top:4px">${{esc(n._summary.slice(0,120))}}</div>` : ''}}
-    ${{neighborIds.length ? `<div class="field" style="margin-top:8px;color:#aaa;font-size:11px">Neighbors (${{neighborIds.length}})</div><div id="neighbors-list">${{neighborItems}}</div>` : ''}}
+    <div class="field">类型：${{esc(n._type || '—')}}</div>
+    ${{n._summary ? `<div class="summary">${{esc(n._summary.slice(0,160))}}</div>` : ''}}
+    <div class="field">度数：${{n._degree}}</div>
+    ${{n._source_file ? `<div class="field" style="color:#666;font-size:11px">${{esc(n._source_file.split('/').pop().split('\\\\').pop())}}</div>` : ''}}
+    ${{neighborIds.length ? `<div class="field" style="margin-top:8px;color:#aaa;font-size:11px">相邻节点（${{neighborIds.length}}）</div><div id="neighbors-list">${{neighborItems}}</div>` : ''}}
   `;
 }}
 
@@ -185,7 +189,7 @@ container.addEventListener('click', () => {{
 network.on('click', params => {{
   if (params.nodes.length > 0) {{ showInfo(params.nodes[0]); }}
   else if (hoveredNodeId === null) {{
-    document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
+    document.getElementById('info-content').innerHTML = '<span class="empty">点击节点查看详情</span>';
   }}
 }});
 
@@ -306,16 +310,16 @@ def to_html(
         legend_data.append({"cid": cid, "color": color, "label": lbl, "count": n})
 
     def _js_safe(obj) -> str:
-        return json.dumps(obj).replace("</", "<\\/")
+        return json.dumps(obj, ensure_ascii=False).replace("</", "<\\/")
 
     nodes_json = _js_safe(vis_nodes)
     edges_json = _js_safe(vis_edges)
     legend_json = _js_safe(legend_data)
     title = _html.escape(sanitize_label(str(path)))
-    stats = f"{G.number_of_nodes()} nodes &middot; {G.number_of_edges()} edges &middot; {len(communities)} communities"
+    stats = f"{G.number_of_nodes()} 节点 &middot; {G.number_of_edges()} 条边 &middot; {len(communities)} 社区"
 
     html = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="zh">
 <head>
 <meta charset="UTF-8">
 <title>BreachPoint — {title}</title>
@@ -326,16 +330,20 @@ def to_html(
 <div id="graph"></div>
 <div id="sidebar">
   <div id="search-wrap">
-    <input id="search" type="text" placeholder="Search nodes..." autocomplete="off">
+    <input id="search" type="text" placeholder="搜索节点..." autocomplete="off">
     <div id="search-results"></div>
   </div>
   <div id="info-panel">
-    <h3>Node Info</h3>
-    <div id="info-content"><span class="empty">Click a node to inspect it</span></div>
+    <h3>节点信息</h3>
+    <div id="info-content"><span class="empty">点击节点查看详情</span></div>
   </div>
   <div id="legend-wrap">
-    <h3>Communities</h3>
+    <h3>社区分类</h3>
     <div id="legend"></div>
+  </div>
+  <div id="edge-legend">
+    <div><span class="el-solid"></span> EXTRACTED（直接定义）</div>
+    <div><span class="el-dashed"></span> INFERRED（推断关系）</div>
   </div>
   <div id="stats">{stats}</div>
 </div>
