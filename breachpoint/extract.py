@@ -69,7 +69,7 @@ _PROMPT = """\
 【边提取规则】
 - 提取所有目标值为 URI 的属性（对象属性三元组）
 - source / target：节点的 id（本地名）
-- relation：属性的中文名，例如 odl:belongsTo → "属于"、odl:responsibleFor → "负责人"、odl:hasTool → "使用工具"
+- relation：**必须使用中文动词短语**，例如 odl:belongsTo → "属于"、odl:responsibleFor → "负责"、odl:hasTool → "使用工具"、odl:contains → "包含"、odl:describes → "描述"。禁止输出英文。
 - confidence：EXTRACTED
 - evidence：一句中文说明此关系
 

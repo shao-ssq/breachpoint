@@ -1,93 +1,98 @@
 ---
 name: breachpoint
-description: knowledge document graph — incremental LLM-driven relationship discovery across documents
+description: TTL/RDF 知识文档图谱 — 增量式 LLM 驱动的跨文档关系发现
 trigger: /breachpoint
 ---
 
 # /breachpoint
 
-Turn any folder of documents into a navigable knowledge graph. Every document gets analysed by Claude to extract concept nodes; new documents are then compared against the entire existing graph to discover cross-document relationships — with unlimited LLM calls per document until all connections are found.
+将任意目录下的 TTL/RDF 文档转换为可导航的知识图谱。每个文档由 Claude 分析提取概念节点；新文档再与整个已有图谱对比发现跨文档关系——每份文档的每个本体结构都要认真思考，直到找全所有连接。
 
-## Usage
+## 用法
 
 ```
-/breachpoint                        # full pipeline on current directory
-/breachpoint <path>                 # full pipeline on specific path
-/breachpoint <path> --update        # incremental — process only new/changed docs
-/breachpoint query "<question>"     # search the graph by keyword
-/breachpoint explain "<concept>"    # describe a node and its connections
+/breachpoint                        # 对当前目录执行完整 pipeline
+/breachpoint <path>                 # 对指定路径执行完整 pipeline
+/breachpoint <path> --update        # 增量模式 — 仅处理新增/变更的文档
+/breachpoint query "<question>"     # 按关键词搜索图谱
+/breachpoint explain "<concept>"    # 描述某个节点及其连接
+/breachpoint path "<A>" "<B>"       # 两个概念之间的最短路径
+/breachpoint export <format> [path] # 导出图谱 (cypher/graphml/svg/obsidian/json)
+/breachpoint cluster-only [path]    # 重新聚类已有图谱，不重新提取
 ```
 
-## What You Must Do When Invoked
+## 被调用时必须做的事
 
-If no path was given, use `.` (current directory). Do not ask the user for a path.
+如果未提供路径，使用 `.`（当前目录）。不要向用户询问路径。
 
-Follow these steps in order. Do not skip steps.
+按顺序执行以下步骤，不要跳过。
 
-### Step 1 — Ensure breachpoint is installed
+### 第一步 — 确保 breachpoint 已安装
 
 ```bash
-BREACHPOINT_BIN=$(which breachpoint 2>/dev/null)
-if [ -n "$BREACHPOINT_BIN" ]; then
-    PYTHON=$(head -1 "$BREACHPOINT_BIN" | tr -d '#!')
-    case "$PYTHON" in
-        *[!a-zA-Z0-9/_.-]*) PYTHON="python3" ;;
-    esac
+if command -v python &>/dev/null; then
+    PY=python
+elif command -v python3 &>/dev/null; then
+    PY=python3
 else
-    PYTHON="python3"
+    echo "ERROR: No python or python3 found"
+    exit 1
 fi
-"$PYTHON" -c "import breachpoint" 2>/dev/null || "$PYTHON" -m pip install breachpoint -q 2>/dev/null || "$PYTHON" -m pip install breachpoint -q --break-system-packages 2>&1 | tail -3
+$PY -c "import breachpoint" 2>/dev/null || $PY -m pip install breachpoint -q 2>/dev/null || $PY -m pip install breachpoint -q --break-system-packages 2>&1 | tail -3
 mkdir -p breachpoint-out
-cat <<'PYEOF' | "$PYTHON"
-import sys; open('breachpoint-out/.bp_python', 'w').write(sys.executable)
-PYEOF
 ```
 
-If the import succeeds, print nothing and move straight to Step 2.
+如果导入成功，静默进入第二步。
 
-**Convention: all subsequent bash blocks use `cat <<'PYEOF' | $(cat breachpoint-out/.bp_python)` to pipe Python code via stdin, avoiding `-c "..."` quoting issues on Windows Git Bash.**
-
-### Step 2 — Detect documents
+**后续所有 bash 块中使用 `python` 或 `python3`：**
 
 ```bash
-cat <<'PYEOF' | $(cat breachpoint-out/.bp_python) > breachpoint-out/.bp_detect.json
+if command -v python &>/dev/null; then PY=python; elif command -v python3 &>/dev/null; then PY=python3; fi
+```
+
+### 第二步 — 检测文档
+
+```bash
+$PY -c "
 import json
 from breachpoint.detect import detect
 from pathlib import Path
 result = detect(Path('INPUT_PATH'))
 print(json.dumps(result))
-PYEOF
+" > breachpoint-out/.bp_detect.json
 ```
 
-Replace INPUT_PATH with the actual path. Read the JSON silently and present a clean summary:
+将 INPUT_PATH 替换为实际路径。静默读取 JSON 并展示简洁摘要：
 
 ```
-Documents: X files · ~Y words
-  docs:   N (.md .txt .rst …)
-  pdfs:   N (.pdf)
-  office: N (.docx)
-  web:    N (.html)
+Documents: X files · ~Y triples
+  ttl:   N (.ttl .turtle)
+  n3:    N (.n3)
 ```
 
-Omit categories with 0 files. Stop if `total_files == 0`.
+省略数量为 0 的类别。如果 `total_files == 0` 则停止。
 
-If `total_words` > 500,000 OR `total_files` > 150: show the top 5 subdirectories by file count and ask which subfolder to run on. Wait for the user's answer before proceeding.
+如果 `total_triples` > 500,000 或 `total_files` > 150：展示按文件数排序的前 5 个子目录，询问用户在哪个子目录上运行。等待用户回答后再继续。
 
-Otherwise: proceed directly to Step 3.
+否则：直接进入第三步。
 
-### Step 3 — Extract concepts and relationships (parallel subagents)
+### 第三步 — 提取概念和关系
 
-**MANDATORY: You MUST use the Agent tool here. Running `python3 -m breachpoint process` is FORBIDDEN — it spawns a subprocess that calls the Anthropic SDK directly and will be blocked by the proxy. You must extract documents via Agent subagents which run inside the current Claude Code session.**
+**优先使用原生 pipeline。** 直接运行 `python -m breachpoint process INPUT_PATH`——它处理提取、跨文档关系、聚类、以及用内置 `to_html()` 生成 HTML（含侧边栏、搜索、社区过滤、暗色主题）。
 
-Before dispatching subagents, print a timing estimate:
-- Load `total_files` from `breachpoint-out/.bp_detect.json`
-- Estimate agents needed: `ceil(uncached_files / 15)`
-- Print: `"Extracting: ~N files → X agents"`
+如果原生 pipeline 失败（如缺少 `ANTHROPIC_AUTH_TOKEN`、网络错误），再回退到下面的子代理提取方案。
 
-#### Step 3.0 — Check extraction cache
+#### 回退方案：子代理提取
+
+在调度子代理之前，打印时间预估：
+- 从 `breachpoint-out/.bp_detect.json` 加载 `total_files`
+- 估算需要 agents 数量：`ceil(uncached_files / 15)`
+- 打印：`"Extracting: ~N files → X agents"`
+
+##### 第三步.0 — 检查提取缓存
 
 ```bash
-cat <<'PYEOF' | $(cat breachpoint-out/.bp_python)
+$PY -c "
 import json, hashlib
 from pathlib import Path
 
@@ -119,28 +124,28 @@ for f in files:
 Path('breachpoint-out/.bp_cached.json').write_text(json.dumps({'nodes': cached_nodes, 'edges': cached_edges}))
 Path('breachpoint-out/.bp_uncached.json').write_text(json.dumps(uncached))
 print(f'Cache: {len(files)-len(uncached)} files hit, {len(uncached)} files need extraction')
-PYEOF
+"
 ```
 
-If all files are cached, skip to Step 4 directly.
+如果所有文件都已缓存，直接跳到第四步。
 
-#### Step 3.1 — Split into chunks of 10-15 files
+##### 第三步.1 — 拆分为 10-15 文件一组
 
-Load `breachpoint-out/.bp_uncached.json`. Split into chunks of 10-15 files. Group files from the same directory together so related documents land in the same chunk.
+加载 `breachpoint-out/.bp_uncached.json`。拆分为每组 10-15 个文件。将同一目录的文件分到同一组，使相关文档落在同一 chunk 中。
 
-#### Step 3.2 — Dispatch ALL subagents in a single message
+##### 第三步.2 — 在同一消息中调度所有子代理
 
-Call the Agent tool multiple times IN THE SAME RESPONSE — one call per chunk. This is the only way they run in parallel. Always use `subagent_type="general-purpose"`.
+调用 Agent 工具多次，**在同一条响应中**——每个 chunk 一次调用。这是它们并行运行的唯一方式。始终使用 `subagent_type="general-purpose"`。
 
-Concrete example for 3 chunks:
+3 个 chunk 的具体示例：
 ```
 [Agent tool call 1: files 1-15, subagent_type="general-purpose"]
 [Agent tool call 2: files 16-30, subagent_type="general-purpose"]
 [Agent tool call 3: files 31-45, subagent_type="general-purpose"]
 ```
-All three in one message. Not three separate messages.
+全部在同一条消息中。不是三条分开的消息。
 
-Each subagent receives this exact prompt (substitute FILE_LIST, CHUNK_NUM, TOTAL_CHUNKS, CACHE_DIR):
+每个子代理收到完全相同的提示词（替换 FILE_LIST, CHUNK_NUM, TOTAL_CHUNKS, CACHE_DIR）：
 
 ```
 You are a breachpoint extraction subagent for knowledge documents.
@@ -174,19 +179,19 @@ Write each individual file's result to: CACHE_DIR/<file_hash>.json  (use the has
 Write the merged chunk result to: breachpoint-out/.bp_chunk_CHUNK_NUM.json
 ```
 
-For each file in FILE_LIST, include the hash from `.bp_uncached.json` so the subagent can write individual cache files.
+对于 FILE_LIST 中的每个文件，包含来自 `.bp_uncached.json` 的 hash，以便子代理写入独立的缓存文件。
 
-#### Step 3.3 — Collect, cache, and merge
+##### 第三步.3 — 收集、缓存、合并
 
-Wait for all subagents. For each chunk:
-- Check that `breachpoint-out/.bp_chunk_NN.json` exists on disk
-- If missing, warn: "chunk N missing — subagent may have been read-only. Re-run with general-purpose agent."
-- If more than half the chunks failed, stop and tell the user to re-run
+等待所有子代理完成。对每个 chunk：
+- 检查 `breachpoint-out/.bp_chunk_NN.json` 是否存在于磁盘
+- 如果缺失，警告：`"chunk N missing — subagent may have been read-only. Re-run with general-purpose agent."`
+- 如果超过一半的 chunk 失败，停止并告诉用户重新运行
 
-Merge cached + new results:
+合并缓存 + 新结果：
 
 ```bash
-cat <<'PYEOF' | $(cat breachpoint-out/.bp_python)
+$PY -c "
 import json
 from pathlib import Path
 
@@ -217,22 +222,22 @@ Path('breachpoint-out/.bp_extract.json').write_text(json.dumps({
     'output_tokens': total_output,
 }))
 print(f'Extraction complete: {len(all_nodes)} nodes, {len(all_edges)} edges')
-PYEOF
+"
 ```
 
-Clean up: `rm -f breachpoint-out/.bp_cached.json breachpoint-out/.bp_uncached.json breachpoint-out/.bp_chunk_*.json`
+清理：`rm -f breachpoint-out/.bp_cached.json breachpoint-out/.bp_uncached.json breachpoint-out/.bp_chunk_*.json`
 
-### Step 4 — Cross-document relationship discovery
+### 第四步 — 跨文档关系发现
 
-This is breachpoint's core differentiator: after per-document extraction, find relationships ACROSS documents.
+这是 breachpoint 的核心差异化能力：在逐文档提取之后，发现跨文档的关系。
 
-Read `breachpoint-out/.bp_extract.json`. Group nodes by `source_file`. For each document, identify its nodes, then look at nodes from OTHER documents and find connections.
+读取 `breachpoint-out/.bp_extract.json`。按 `source_file` 分组节点。对每个文档，识别其节点，然后查看其他文档的节点并寻找连接。
 
-**For corpora ≤ 20 files**: do this yourself inline — read the node list and write cross-document edges directly into `.bp_extract.json`.
+**对于 ≤ 20 个文件的语料库**：自行内联完成——读取节点列表并直接将跨文档边写入 `.bp_extract.json`。
 
-**For corpora > 20 files**: dispatch one subagent per source document in a single message:
+**对于 > 20 个文件的语料库**：在单条消息中为每个源文档调度一个子代理：
 
-Subagent prompt:
+子代理提示词：
 ```
 You are a cross-document relationship finder for a knowledge graph.
 
@@ -250,10 +255,10 @@ Output ONLY valid JSON (no markdown fences):
 Write result to: breachpoint-out/.bp_cross_INDEX.json
 ```
 
-After all subagents complete, merge cross-document edges into `.bp_extract.json`:
+所有子代理完成后，将跨文档边合并到 `.bp_extract.json`：
 
 ```bash
-cat <<'PYEOF' | $(cat breachpoint-out/.bp_python)
+$PY -c "
 import json
 from pathlib import Path
 
@@ -268,14 +273,14 @@ for cross_file in sorted(Path('breachpoint-out').glob('.bp_cross_*.json')):
 Path('breachpoint-out/.bp_extract.json').write_text(json.dumps(extract))
 total_cross = sum(len(json.loads(f.read_text()).get('edges',[])) for f in Path('breachpoint-out').glob('.bp_cross_*.json') if f.exists())
 print(f'Cross-document edges added: {total_cross}')
-PYEOF
-```
+"
 rm -f breachpoint-out/.bp_cross_*.json
+```
 
-### Step 5 — Build graph, cluster, analyze, generate outputs
+### 第五步 — 构建图谱、聚类、分析、生成输出
 
 ```bash
-cat <<'PYEOF' | $(cat breachpoint-out/.bp_python) 2>&1
+$PY -c "
 import json
 from breachpoint.build import build_from_json
 from breachpoint.cluster import cluster, score_all
@@ -289,8 +294,8 @@ extract = json.loads(Path('breachpoint-out/.bp_extract.json').read_text())
 G = build_from_json(extract)
 communities = cluster(G)
 cohesion = score_all(G, communities)
-gods = god_nodes(G, top_n=10)
-labels = {cid: f'Community {cid}' for cid in communities}
+gods = god_nodes(G, top_n=10, communities=communities)
+labels = {cid: f'社区 {cid}' for cid in communities}
 tokens = {'input': extract.get('input_tokens', 0), 'output': extract.get('output_tokens', 0)}
 
 report = generate(G, communities, labels, root='INPUT_PATH', tokens=tokens)
@@ -308,22 +313,22 @@ if G.number_of_nodes() == 0:
     print('ERROR: Graph is empty — extraction produced no nodes.')
     raise SystemExit(1)
 print(f'Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {len(communities)} communities')
-PYEOF
+" 2>&1
 ```
 
-Replace INPUT_PATH with the actual path. If this fails because the package is not installed, build the outputs manually:
-- Write `breachpoint-out/graph.json` as NetworkX node-link format
-- Write `breachpoint-out/graph.html` using vis.js with the node/edge data inlined as JSON in a `<script>` tag
-- Write `breachpoint-out/GRAPH_REPORT.md` summarizing communities and hub nodes
+将 INPUT_PATH 替换为实际路径。如果因为包未安装而失败，手动构建输出：
+- 将 `breachpoint-out/graph.json` 写为 NetworkX node-link 格式
+- 使用 vis.js 编写 `breachpoint-out/graph.html`，节点/边数据以内联 JSON 放入 `<script>` 标签
+- 编写 `breachpoint-out/GRAPH_REPORT.md`，总结社区和中心节点
 
-### Step 6 — Label communities
+### 第六步 — 标记社区
 
-Read `breachpoint-out/.bp_analysis.json`. For each community key, look at its node labels and write a 2-5 word plain-language name (e.g. "Attention Mechanism", "Data Pipeline", "Security Protocols").
+读取 `breachpoint-out/.bp_analysis.json`。对每个社区键，查看其节点标签并写一个 2-5 个词的中文名称（如 "注意力机制"、"数据管道"、"安全协议"）。默认为 `社区 {cid}`。
 
-Then regenerate report and save labels:
+然后重新生成报告并保存标签：
 
 ```bash
-cat <<'PYEOF' | $(cat breachpoint-out/.bp_python) 2>&1
+$PY -c "
 import json
 from breachpoint.build import build_from_json
 from breachpoint.cluster import score_all
@@ -343,20 +348,20 @@ report = generate(G, communities, labels, root='INPUT_PATH', tokens=tokens)
 Path('breachpoint-out/GRAPH_REPORT.md').write_text(report, encoding='utf-8')
 Path('breachpoint-out/.bp_labels.json').write_text(json.dumps({str(k): v for k, v in labels.items()}))
 print('Report updated with community labels')
-PYEOF
+" 2>&1
 ```
 
-Replace `LABELS_DICT` with the actual dict you constructed (e.g. `{0: "Attention Mechanism", 1: "Data Pipeline"}`).
-Replace INPUT_PATH with the actual path.
+将 `LABELS_DICT` 替换为你构建的实际字典（如 `{0: "本体核心类", 1: "数据属性", 2: "实例关系"}`）。
+将 INPUT_PATH 替换为实际路径。
 
-### Step 7 — Clean up and report
+### 第七步 — 清理和报告
 
 ```bash
 rm -f breachpoint-out/.bp_detect.json breachpoint-out/.bp_extract.json
 rm -f breachpoint-out/.bp_analysis.json breachpoint-out/.bp_labels.json
 ```
 
-Tell the user:
+告诉用户：
 ```
 Knowledge graph built. Outputs in PATH/breachpoint-out/
 
@@ -365,33 +370,33 @@ Knowledge graph built. Outputs in PATH/breachpoint-out/
   graph.json       — raw graph data
 ```
 
-Replace PATH with the actual absolute path.
+将 PATH 替换为实际绝对路径。
 
-Then paste these sections from GRAPH_REPORT.md directly into chat:
+然后从 GRAPH_REPORT.md 直接粘贴以下三个部分到聊天中：
 - Hub Nodes (top 5)
 - Surprising Cross-document Connections
 - Suggested Questions
 
-Do NOT paste the full report — just those three sections.
+不要粘贴完整报告——只贴这三个部分。
 
-Then pick the single most interesting suggested question and ask:
+然后挑选最有趣的一个建议问题并询问：
 
 > "The most interesting question this graph can answer: **[question]**. Want me to trace it?"
 
 ---
 
-## For --update (incremental)
+## 对于 --update（增量模式）
 
-Check `breachpoint-out/graph.json` for a `processed_files` map. Re-detect the corpus, find files whose SHA-256 hash differs from the stored value, then re-run Steps 3–7 on changed/new files only and merge with the existing graph.
+检查 `breachpoint-out/graph.json` 中的 `processed_files` 映射。重新检测语料库，找出 SHA-256 hash 与存储值不同的文件，仅对变更/新增的文件重新运行第三步到第七步，并与已有图谱合并。
 
 ---
 
-## For query
+## 对于 query
 
-Load `breachpoint-out/graph.json` with Python. Do NOT spawn a subprocess that calls the API.
+加载 `breachpoint-out/graph.json` 用 Python。
 
 ```bash
-cat <<'PYEOF' | $(cat breachpoint-out/.bp_python) 2>&1
+$PY -c "
 import json
 from networkx.readwrite import json_graph
 from pathlib import Path
@@ -421,20 +426,99 @@ for nid in result[:15]:
     if d.get('summary'): print(f'    {d["summary"]}')
     if d.get('source_file'): print(f'    Source: {d["source_file"].split("/")[-1]}')
     print()
-PYEOF
+" 2>&1
 ```
 
-Then answer the question using the graph output. Quote `source_file` when citing a specific fact.
+然后用图谱输出回答问题。引用具体事实时注明 `source_file`。
 
 ---
 
-## For explain
+## 对于 explain
 
-Load the graph, find the node matching the concept, print its connections, then write a 3-5 sentence explanation of what it is, what it connects to, and why those connections are significant.
+加载图谱，找到匹配概念的节点，打印其连接，然后写 3-5 句话解释它是什么、连接到什么、为什么这些连接很重要。
 
 ---
 
-## Node Schema
+## 对于 path
+
+加载图谱，模糊匹配两个标签，打印最短路径及边关系和置信度。
+
+```bash
+$PY -c "
+import json, sys
+import networkx as nx
+from networkx.readwrite import json_graph as jg
+from pathlib import Path
+
+data = json.loads(Path('breachpoint-out/graph.json').read_text(encoding='utf-8'))
+try:
+    G = jg.node_link_graph(data, edges='links')
+except TypeError:
+    G = jg.node_link_graph(data)
+
+def find(q):
+    q_l = q.lower()
+    scored = [(nid, len(set(q_l.split()) & set(G.nodes[nid].get('label','').lower().split())))
+              for nid in G.nodes() if q_l in G.nodes[nid].get('label','').lower()]
+    scored.sort(key=lambda x: -x[1])
+    return scored[0][0] if scored else None
+
+src = find('SOURCE_LABEL')
+tgt = find('TARGET_LABEL')
+if not src or not tgt:
+    print('Node not found'); sys.exit(1)
+
+try:
+    path_nodes = nx.shortest_path(G, src, tgt)
+except (nx.NetworkXNoPath, nx.NodeNotFound):
+    print('No path found'); sys.exit(0)
+
+hops = len(path_nodes) - 1
+parts = [G.nodes[path_nodes[0]].get('label', path_nodes[0])]
+for i in range(len(path_nodes)-1):
+    u, v = path_nodes[i], path_nodes[i+1]
+    e = G.edges[u, v]
+    conf = f' [{e.get("confidence","")}]' if e.get('confidence') else ''
+    parts.append(f'--{e.get("relation","")} {conf}--> {G.nodes[v].get("label", v)}')
+print(f'Shortest path ({hops} hops): ' + ' '.join(parts))
+" 2>&1
+```
+
+替换 SOURCE_LABEL 和 TARGET_LABEL。然后向用户解释这条路径。
+
+---
+
+## 对于 cluster-only
+
+重新聚类已有图谱，不重新运行提取。适用于手动添加新边或调优社区检测后。
+
+```bash
+$PY -c "
+import json
+from breachpoint.build import build_from_json
+from breachpoint.cluster import cluster, score_all
+from breachpoint.report import generate
+from breachpoint.export import to_json
+from pathlib import Path
+
+raw = json.loads(Path('breachpoint-out/graph.json').read_text(encoding='utf-8'))
+G = build_from_json(raw)
+print(f'Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges')
+communities = cluster(G)
+labels = {cid: f'社区 {cid}' for cid in communities}
+report = generate(G, communities, labels, root='INPUT_PATH', tokens={'input':0,'output':0})
+out = Path('breachpoint-out')
+(out / 'GRAPH_REPORT.md').write_text(report, encoding='utf-8')
+to_json(G, communities, out / 'graph.json')
+print(f'Done — {len(communities)} communities. GRAPH_REPORT.md and graph.json updated.')
+" 2>&1
+```
+
+替换 INPUT_PATH。向用户报告新的社区数量。
+
+---
+
+## 节点 Schema
 
 ```json
 {
@@ -446,7 +530,7 @@ Load the graph, find the node matching the concept, print its connections, then 
 }
 ```
 
-## Edge Schema
+## 边 Schema
 
 ```json
 {
@@ -458,14 +542,14 @@ Load the graph, find the node matching the concept, print its connections, then 
 }
 ```
 
-Confidence levels:
-- `EXTRACTED` — stated explicitly in the document(s)
-- `INFERRED` — clearly implied by context
-- `AMBIGUOUS` — possible but uncertain
+置信度等级：
+- `EXTRACTED` — 文档中明确陈述
+- `INFERRED` — 从上下文中明确推断
+- `AMBIGUOUS` — 可能但不确定
 
-## Honesty Rules
+## 诚实规则
 
-- Never invent an edge. If unsure, use AMBIGUOUS.
-- Never skip the corpus size warning.
-- Always show token cost in the final report.
-- Never run `python3 -m breachpoint process` — it will be blocked by the proxy.
+- 不要发明边。如果不确定，使用 AMBIGUOUS。
+- 不要跳过语料库大小警告。
+- 始终在最终报告中显示 token 成本。
+- 优先使用 `python -m breachpoint process <path>` 而非手动提取。

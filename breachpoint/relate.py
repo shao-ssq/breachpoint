@@ -31,6 +31,7 @@ _SYSTEM = """\
 
 规则：
 - 只输出新节点与已有节点之间的跨文档连接。
+- **relation 字段必须使用中文动词短语**，例如："属于"、"负责"、"使用"、"包含"、"描述"、"支持"、"引用"。禁止输出英文关系名。
 - confidence=EXTRACTED：两文档中明确陈述的关系。
 - confidence=INFERRED：可合理推断的关系。
 - confidence=AMBIGUOUS：可能存在但不确定，若有价值仍可包含。

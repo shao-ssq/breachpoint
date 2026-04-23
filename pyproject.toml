@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "breachpoint"
@@ -27,3 +27,6 @@ breachpoint = "breachpoint.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["breachpoint"]
+
+[tool.setuptools.packages.find]
+include = ["breachpoint*"]
