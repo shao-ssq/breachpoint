@@ -107,7 +107,7 @@ $PY -c "
 import json, hashlib
 from pathlib import Path
 
-detect = json.loads(Path('breachpoint-out/.bp_detect.json').read_text())
+detect = json.loads(Path('breachpoint-out/.bp_detect.json').read_text(encoding='utf-8'))
 files = detect.get('files', [])
 cache_dir = Path('breachpoint-out/.cache')
 cache_dir.mkdir(exist_ok=True)
@@ -124,7 +124,7 @@ for f in files:
     cache_file = cache_dir / f'{h}.json'
     if cache_file.exists():
         try:
-            data = json.loads(cache_file.read_text())
+            data = json.loads(cache_file.read_text(encoding='utf-8'))
             cached_nodes.extend(data.get('nodes', []))
             cached_edges.extend(data.get('edges', []))
         except Exception:
@@ -168,7 +168,7 @@ FILE_LIST
 
 对每个文件：
 1. 在一次并行批次中读取本 chunk 内的所有文件 — 所有 Read 调用放在同一条消息中。绝不逐文件串行读取。
-2. 只提取具体实例个体（具名实例），跳过类定义（owl:Class、owl:ObjectProperty 等本体声明）。
+2. 提取文件中每一个具名资源作为节点。
 3. 提取节点的所有数据属性（字面量），以中文字段名保存在节点顶层。
 4. 提取所有目标为 URI 的对象属性三元组作为边，relation 必须使用中文动词短语（禁止英文）。
 5. 列出本文件中引用但未定义的外部节点 ID。
@@ -207,14 +207,14 @@ $PY -c "
 import json
 from pathlib import Path
 
-cached = json.loads(Path('breachpoint-out/.bp_cached.json').read_text())
+cached = json.loads(Path('breachpoint-out/.bp_cached.json').read_text(encoding='utf-8'))
 all_nodes = list(cached.get('nodes', []))
 all_edges = list(cached.get('edges', []))
 seen_ids = {n['id'] for n in all_nodes}
 
 for chunk_file in sorted(Path('breachpoint-out').glob('.bp_chunk_*.json')):
     try:
-        data = json.loads(chunk_file.read_text())
+        data = json.loads(chunk_file.read_text(encoding='utf-8'))
         for n in data.get('nodes', []):
             if n['id'] not in seen_ids:
                 all_nodes.append(n)
@@ -269,10 +269,10 @@ $PY -c "
 import json
 from pathlib import Path
 
-extract = json.loads(Path('breachpoint-out/.bp_extract.json').read_text())
+extract = json.loads(Path('breachpoint-out/.bp_extract.json').read_text(encoding='utf-8'))
 for cross_file in sorted(Path('breachpoint-out').glob('.bp_cross_*.json')):
     try:
-        data = json.loads(cross_file.read_text())
+        data = json.loads(cross_file.read_text(encoding='utf-8'))
         extract['edges'].extend(data.get('edges', []))
     except Exception as e:
         print(f'warning: {cross_file.name}: {e}')
@@ -295,7 +295,7 @@ from breachpoint.export import to_json, to_html
 from breachpoint.analyze import god_nodes
 from pathlib import Path
 
-extract = json.loads(Path('breachpoint-out/.bp_extract.json').read_text())
+extract = json.loads(Path('breachpoint-out/.bp_extract.json').read_text(encoding='utf-8'))
 
 G = build_from_json(extract)
 communities = cluster(G)
@@ -340,8 +340,8 @@ from breachpoint.build import build_from_json
 from breachpoint.report import generate
 from pathlib import Path
 
-extract  = json.loads(Path('breachpoint-out/.bp_extract.json').read_text())
-analysis = json.loads(Path('breachpoint-out/.bp_analysis.json').read_text())
+extract  = json.loads(Path('breachpoint-out/.bp_extract.json').read_text(encoding='utf-8'))
+analysis = json.loads(Path('breachpoint-out/.bp_analysis.json').read_text(encoding='utf-8'))
 
 G = build_from_json(extract)
 communities = {int(k): v for k, v in analysis['communities'].items()}
@@ -406,7 +406,7 @@ import json
 from networkx.readwrite import json_graph
 from pathlib import Path
 
-data = json.loads(Path('breachpoint-out/graph.json').read_text())
+data = json.loads(Path('breachpoint-out/graph.json').read_text(encoding='utf-8'))
 try:
     G = json_graph.node_link_graph(data, edges='links')
 except TypeError:
