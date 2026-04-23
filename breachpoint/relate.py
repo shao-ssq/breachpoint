@@ -1,16 +1,21 @@
 """Cross-document relationship discovery — the core innovation of BreachPoint.
 
 Given a batch of newly extracted nodes, compare them against all existing graph
-nodes and call Claude (via claude CLI subprocess) to discover cross-document edges.
+nodes and call Claude (via Anthropic Python SDK) to discover cross-document edges.
 
 Public API:
     relate(new_nodes, existing_nodes, *, batch_size, max_rounds) -> list[dict]
 """
 from __future__ import annotations
+import anthropic
 import json
+import os
 import re
-import subprocess
 import sys
+
+_API_KEY = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "")
+_MODEL = os.environ.get("ANTHROPIC_MODEL", os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-20250514"))
 
 DEFAULT_BATCH_SIZE = 20
 DEFAULT_MAX_ROUNDS = 0   # 0 = unlimited
@@ -117,14 +122,18 @@ def relate(
             print(f"[relate] round {round_idx}/{len(batches)} — {len(new_nodes)} new × {len(batch)} existing", file=sys.stderr)
 
         try:
-            result = subprocess.run(
-                ["claude", "-p", prompt],
-                capture_output=True, text=True, encoding="utf-8", timeout=180,
+            if _API_KEY and _BASE_URL:
+                client = anthropic.Anthropic(api_key=_API_KEY, base_url=_BASE_URL)
+            elif _API_KEY:
+                client = anthropic.Anthropic(api_key=_API_KEY)
+            else:
+                print("[relate] 未设置 ANTHROPIC_AUTH_TOKEN", file=sys.stderr)
+                break
+            msg = client.messages.create(
+                model=_MODEL, max_tokens=4096, messages=[{"role": "user", "content": prompt}],
             )
-            edges = _parse_edges(result.stdout)
-        except FileNotFoundError:
-            print("[relate] 未找到 claude 命令", file=sys.stderr)
-            break
+            raw = "".join(b.text for b in msg.content if b.type == "text")
+            edges = _parse_edges(raw)
         except Exception as exc:
             print(f"[relate] round {round_idx} error: {exc}", file=sys.stderr)
             continue

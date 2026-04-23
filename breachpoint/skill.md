@@ -38,23 +38,25 @@ else
 fi
 "$PYTHON" -c "import breachpoint" 2>/dev/null || "$PYTHON" -m pip install breachpoint -q 2>/dev/null || "$PYTHON" -m pip install breachpoint -q --break-system-packages 2>&1 | tail -3
 mkdir -p breachpoint-out
-"$PYTHON" -c "import sys; open('breachpoint-out/.bp_python', 'w').write(sys.executable)"
+cat <<'PYEOF' | "$PYTHON"
+import sys; open('breachpoint-out/.bp_python', 'w').write(sys.executable)
+PYEOF
 ```
 
 If the import succeeds, print nothing and move straight to Step 2.
 
-**In every subsequent bash block, replace `python3` with `$(cat breachpoint-out/.bp_python)` to use the correct interpreter.**
+**Convention: all subsequent bash blocks use `cat <<'PYEOF' | $(cat breachpoint-out/.bp_python)` to pipe Python code via stdin, avoiding `-c "..."` quoting issues on Windows Git Bash.**
 
 ### Step 2 — Detect documents
 
 ```bash
-$(cat breachpoint-out/.bp_python) -c "
+cat <<'PYEOF' | $(cat breachpoint-out/.bp_python) > breachpoint-out/.bp_detect.json
 import json
 from breachpoint.detect import detect
 from pathlib import Path
 result = detect(Path('INPUT_PATH'))
 print(json.dumps(result))
-" > breachpoint-out/.bp_detect.json
+PYEOF
 ```
 
 Replace INPUT_PATH with the actual path. Read the JSON silently and present a clean summary:
@@ -85,7 +87,7 @@ Before dispatching subagents, print a timing estimate:
 #### Step 3.0 — Check extraction cache
 
 ```bash
-$(cat breachpoint-out/.bp_python) -c "
+cat <<'PYEOF' | $(cat breachpoint-out/.bp_python)
 import json, hashlib
 from pathlib import Path
 
@@ -117,7 +119,7 @@ for f in files:
 Path('breachpoint-out/.bp_cached.json').write_text(json.dumps({'nodes': cached_nodes, 'edges': cached_edges}))
 Path('breachpoint-out/.bp_uncached.json').write_text(json.dumps(uncached))
 print(f'Cache: {len(files)-len(uncached)} files hit, {len(uncached)} files need extraction')
-"
+PYEOF
 ```
 
 If all files are cached, skip to Step 4 directly.
@@ -184,7 +186,7 @@ Wait for all subagents. For each chunk:
 Merge cached + new results:
 
 ```bash
-$(cat breachpoint-out/.bp_python) -c "
+cat <<'PYEOF' | $(cat breachpoint-out/.bp_python)
 import json
 from pathlib import Path
 
@@ -215,7 +217,7 @@ Path('breachpoint-out/.bp_extract.json').write_text(json.dumps({
     'output_tokens': total_output,
 }))
 print(f'Extraction complete: {len(all_nodes)} nodes, {len(all_edges)} edges')
-"
+PYEOF
 ```
 
 Clean up: `rm -f breachpoint-out/.bp_cached.json breachpoint-out/.bp_uncached.json breachpoint-out/.bp_chunk_*.json`
@@ -251,7 +253,7 @@ Write result to: breachpoint-out/.bp_cross_INDEX.json
 After all subagents complete, merge cross-document edges into `.bp_extract.json`:
 
 ```bash
-$(cat breachpoint-out/.bp_python) -c "
+cat <<'PYEOF' | $(cat breachpoint-out/.bp_python)
 import json
 from pathlib import Path
 
@@ -266,14 +268,14 @@ for cross_file in sorted(Path('breachpoint-out').glob('.bp_cross_*.json')):
 Path('breachpoint-out/.bp_extract.json').write_text(json.dumps(extract))
 total_cross = sum(len(json.loads(f.read_text()).get('edges',[])) for f in Path('breachpoint-out').glob('.bp_cross_*.json') if f.exists())
 print(f'Cross-document edges added: {total_cross}')
-"
-rm -f breachpoint-out/.bp_cross_*.json
+PYEOF
 ```
+rm -f breachpoint-out/.bp_cross_*.json
 
 ### Step 5 — Build graph, cluster, analyze, generate outputs
 
 ```bash
-$(cat breachpoint-out/.bp_python) -c "
+cat <<'PYEOF' | $(cat breachpoint-out/.bp_python) 2>&1
 import json
 from breachpoint.build import build_from_json
 from breachpoint.cluster import cluster, score_all
@@ -306,7 +308,7 @@ if G.number_of_nodes() == 0:
     print('ERROR: Graph is empty — extraction produced no nodes.')
     raise SystemExit(1)
 print(f'Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {len(communities)} communities')
-" 2>&1
+PYEOF
 ```
 
 Replace INPUT_PATH with the actual path. If this fails because the package is not installed, build the outputs manually:
@@ -321,7 +323,7 @@ Read `breachpoint-out/.bp_analysis.json`. For each community key, look at its no
 Then regenerate report and save labels:
 
 ```bash
-$(cat breachpoint-out/.bp_python) -c "
+cat <<'PYEOF' | $(cat breachpoint-out/.bp_python) 2>&1
 import json
 from breachpoint.build import build_from_json
 from breachpoint.cluster import score_all
@@ -341,7 +343,7 @@ report = generate(G, communities, labels, root='INPUT_PATH', tokens=tokens)
 Path('breachpoint-out/GRAPH_REPORT.md').write_text(report, encoding='utf-8')
 Path('breachpoint-out/.bp_labels.json').write_text(json.dumps({str(k): v for k, v in labels.items()}))
 print('Report updated with community labels')
-" 2>&1
+PYEOF
 ```
 
 Replace `LABELS_DICT` with the actual dict you constructed (e.g. `{0: "Attention Mechanism", 1: "Data Pipeline"}`).
@@ -389,7 +391,7 @@ Check `breachpoint-out/graph.json` for a `processed_files` map. Re-detect the co
 Load `breachpoint-out/graph.json` with Python. Do NOT spawn a subprocess that calls the API.
 
 ```bash
-$(cat breachpoint-out/.bp_python) -c "
+cat <<'PYEOF' | $(cat breachpoint-out/.bp_python) 2>&1
 import json
 from networkx.readwrite import json_graph
 from pathlib import Path
@@ -415,11 +417,11 @@ while queue and len(result) < 25:
 
 for nid in result[:15]:
     d = G.nodes[nid]
-    print(f'  [{d.get(\"type\",\"?\")}] {d.get(\"label\", nid)}')
-    if d.get('summary'): print(f'    {d[\"summary\"]}')
-    if d.get('source_file'): print(f'    Source: {d[\"source_file\"].split(\"/\")[-1]}')
+    print(f'  [{d.get("type","?")}] {d.get("label", nid)}')
+    if d.get('summary'): print(f'    {d["summary"]}')
+    if d.get('source_file'): print(f'    Source: {d["source_file"].split("/")[-1]}')
     print()
-" 2>&1
+PYEOF
 ```
 
 Then answer the question using the graph output. Quote `source_file` when citing a specific fact.

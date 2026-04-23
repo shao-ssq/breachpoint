@@ -8,11 +8,13 @@ import networkx as nx
 from networkx.readwrite import json_graph
 
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 _MAX_LABEL_LEN = 256
 
 
 def sanitize_label(text: str) -> str:
     text = _CONTROL_CHAR_RE.sub("", text)
+    text = _HTML_TAG_RE.sub("", text)
     if len(text) > _MAX_LABEL_LEN:
         text = text[:_MAX_LABEL_LEN]
     return text

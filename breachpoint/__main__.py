@@ -89,7 +89,7 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
         try:
             result = extract(fpath)
         except Exception as e:
-            print(f"  ✗ {e}")
+            print(f"  X {e}")
             continue
 
         # 写入节点（含 stub）
@@ -114,7 +114,7 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
         store.mark_processed(rel, fhash)
         store.save()
         processed_count += 1
-        print(f"  ✓ {len(new_real_nodes)} 个节点")
+        print(f"  + {len(new_real_nodes)} 个节点")
 
     if processed_count == 0 and incremental:
         print("Nothing changed — graph is up to date.")
