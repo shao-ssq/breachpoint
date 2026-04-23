@@ -368,25 +368,25 @@ rm -f breachpoint-out/.bp_analysis.json breachpoint-out/.bp_labels.json
 
 告诉用户：
 ```
-Knowledge graph built. Outputs in PATH/breachpoint-out/
+知识图谱已构建完成。输出文件在 PATH/breachpoint-out/
 
-  graph.html       — interactive graph, open in browser
-  GRAPH_REPORT.md  — community structure and surprising connections
-  graph.json       — raw graph data
+  graph.html       — 交互式图谱，用浏览器打开
+  GRAPH_REPORT.md  — 社区结构和核心连接
+  graph.json       — 原始图数据
 ```
 
 将 PATH 替换为实际绝对路径。
 
 然后从 GRAPH_REPORT.md 直接粘贴以下三个部分到聊天中：
-- Hub Nodes (top 5)
-- Cross-Document Connections
-- Suggested Exploration Questions
+- 核心节点（top 5）
+- 跨文档连接
+- 建议探索问题
 
 不要粘贴完整报告——只贴这三个部分。
 
 然后挑选最有趣的一个建议问题并询问：
 
-> "The most interesting question this graph can answer: **[question]**. Want me to trace it?"
+> "这个图谱最有趣的问题是：**[问题]**。要我追溯一下吗？"
 
 ---
 

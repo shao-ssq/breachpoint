@@ -7,7 +7,6 @@
     extract(path) -> dict   — {nodes, edges, input_tokens, output_tokens}
 """
 from __future__ import annotations
-import anthropic
 import json
 import os
 import re
@@ -16,10 +15,32 @@ from pathlib import Path
 
 _TTL_EXTENSIONS: frozenset[str] = frozenset({".ttl", ".turtle", ".n3"})
 
-# 直接使用 Anthropic Python SDK，避免 Windows 上 claude CLI 子进程 PATH/bash 问题
 _API_KEY = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
 _BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "")
 _MODEL = os.environ.get("ANTHROPIC_MODEL", os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-20250514"))
+
+
+def _run_claude(prompt: str) -> str:
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("anthropic 包未安装")
+    kwargs = {"model": _MODEL, "max_tokens": 8192, "messages": [{"role": "user", "content": prompt}]}
+    if _API_KEY and _BASE_URL:
+        client = anthropic.Anthropic(api_key=_API_KEY, base_url=_BASE_URL)
+    elif _API_KEY:
+        client = anthropic.Anthropic(api_key=_API_KEY)
+    else:
+        raise RuntimeError("未设置 ANTHROPIC_AUTH_TOKEN 环境变量")
+    msg = client.messages.create(**kwargs)
+    raw = "".join(b.text for b in msg.content if b.type == "text")
+    raw = re.sub(r"^```(?:json)?\s*\n?", "", raw, flags=re.MULTILINE)
+    raw = re.sub(r"\s*```\s*$", "", raw)
+    first = raw.find("{")
+    last = raw.rfind("}")
+    if first != -1 and last != -1 and last > first:
+        raw = raw[first:last+1]
+    return raw
 
 _PROMPT = """\
 你是知识图谱提取专家，专门从 TTL/RDF 本体文件中提取结构化的知识图谱（节点和边）。
@@ -76,27 +97,6 @@ TTL 文件内容：
 {ttl_content}
 ```
 """
-
-
-def _run_claude(prompt: str) -> str:
-    kwargs = {"model": _MODEL, "max_tokens": 8192, "messages": [{"role": "user", "content": prompt}]}
-    if _API_KEY and _BASE_URL:
-        client = anthropic.Anthropic(api_key=_API_KEY, base_url=_BASE_URL)
-    elif _API_KEY:
-        client = anthropic.Anthropic(api_key=_API_KEY)
-    else:
-        raise RuntimeError("未设置 ANTHROPIC_AUTH_TOKEN 环境变量")
-    msg = client.messages.create(**kwargs)
-    raw = "".join(b.text for b in msg.content if b.type == "text")
-    # Strip markdown fences
-    raw = re.sub(r"^```(?:json)?\s*\n?", "", raw, flags=re.MULTILINE)
-    raw = re.sub(r"\s*```\s*$", "", raw)
-    # Find first { and last } to extract JSON block
-    first = raw.find("{")
-    last = raw.rfind("}")
-    if first != -1 and last != -1 and last > first:
-        raw = raw[first:last+1]
-    return raw
 
 
 def extract(path: str | Path, client=None) -> dict:

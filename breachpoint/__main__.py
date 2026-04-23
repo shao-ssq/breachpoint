@@ -49,7 +49,7 @@ def _community_labels(communities: dict) -> dict:
 def cmd_process(args: list[str], incremental: bool = False) -> None:
     from .detect import detect
     from .extract import extract
-    from .relate import relate
+
     from .store import load, file_hash
     from .build import build
     from .cluster import cluster
@@ -73,7 +73,8 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
         return
 
     # ── Phase 1: extract & relate ────────────────────────────────────────────
-    store = load(out)
+    from .store import Store
+    store = load(out) if incremental else Store(out / "graph.json")
     processed_count = 0
 
     for i, finfo in enumerate(files, 1):
@@ -103,13 +104,6 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
         for edge in result["edges"]:
             store.add_edge_and_save(edge)
 
-        # 跨文档关系发现（仅在已有其他文件节点时执行）
-        if new_real_nodes and len(store) > len(new_real_nodes):
-            cross_edges = relate(new_real_nodes, store.nodes)
-            for edge in cross_edges:
-                store.add_edge_and_save(edge)
-            if cross_edges:
-                print(f"  +{len(cross_edges)} 跨文档边", end=" ", flush=True)
 
         store.mark_processed(rel, fhash)
         store.save()
