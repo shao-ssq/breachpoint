@@ -22,10 +22,14 @@ _BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "")
 _MODEL = os.environ.get("ANTHROPIC_MODEL", os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-20250514"))
 
 _PROMPT = """\
-你是知识图谱提取专家，专门从 TTL/RDF 本体中提取实例级知识图谱。
+你是知识图谱提取专家，专门从 TTL/RDF 本体中提取完整的两层知识图谱。
 
-【提取目标】
-只提取具体的实例个体（具名实例），例如：
+【提取目标：两层并行提取】
+
+═══════════════════════════════════════
+第一层：实例层（Instance Level）
+═══════════════════════════════════════
+提取具体的实例个体（具名实例），例如：
 - odl:Theme（主题任务）的实例
 - odl:Person（人员）的实例
 - odl:Project（项目）的实例
@@ -35,18 +39,27 @@ _PROMPT = """\
 - odl:Risk（风险）的实例
 - odl:Milestone（里程碑）的实例
 
-【跳过本体声明】
-以下类型的声明全部跳过，不提取：
-- owl:Class、owl:ObjectProperty、owl:DatatypeProperty
-- owl:AnnotationProperty、owl:Ontology、owl:Restriction
+═══════════════════════════════════════
+第二层：本体层（Ontology Level）
+═══════════════════════════════════════
+提取类和属性的定义声明：
+- owl:Class                → 节点类型："本体类"
+- owl:ObjectProperty       → 节点类型："对象属性"
+- owl:DatatypeProperty     → 节点类型："数据属性"
+- owl:AnnotationProperty   → 节点类型："注解属性"
+
+跳过（不提取为节点）：
+- owl:Ontology 声明本身（但 owl:imports 的目标要计入 external_refs）
+- owl:Restriction（匿名限制节点）
 - rdf:Property、rdfs:Class
-- 任何本体类定义（如 odl:hasTodo、odl:belongsTo 等对象属性的定义）
 
 【节点提取规则】
-- id：URI 本地名（# 或最后一个 / 之后的部分），例如 ex:Theme_RuleConsistency → "Theme_RuleConsistency"
+- id：URI 本地名（# 或最后一个 / 之后的部分）
 - label：rdfs:label 的值（优先中文），无则从 id 推导简洁中文名
-- type：rdf:type 对应的中文类型名，例如 odl:Theme → "主题任务"、odl:Person → "人员"
-- summary：综合该实例所有属性写一句完整中文描述（30-80字）
+- type：按上方两层分类填写中文类型名
+- summary：综合该节点所有声明写一句完整中文描述（30-80字）
+
+实例节点额外规则：
 - 所有数据属性（字面量）以中文字段名扁平保存在节点顶层，例如：
     odl:startTime                → "开始时间"
     odl:status                   → "状态"
@@ -67,14 +80,29 @@ _PROMPT = """\
     odl:actualCompletionTime     → "实际完成时间"
 
 【边提取规则】
-- 提取所有目标值为 URI 的属性（对象属性三元组）
+relation 字段必须使用中文动词短语，禁止英文。
+
+实例层边（对象属性三元组）：
+- 提取所有目标值为 URI 的属性
+- 例：odl:belongsTo → "属于"、odl:responsibleFor → "负责"、odl:hasTool → "使用工具"、odl:contains → "包含"
+
+本体层边（结构关系，重点提取——这是跨文档隐藏关联的来源）：
+- rdfs:subClassOf     → "继承自"
+- rdfs:domain         → "属性域为"
+- rdfs:range          → "属性值域为"
+- owl:imports         → "导入"
+- owl:equivalentClass → "等价于"
+- rdfs:subPropertyOf  → "子属性为"
+- owl:inverseOf       → "逆属性为"
+
+通用边字段：
 - source / target：节点的 id（本地名）
-- relation：**必须使用中文动词短语**，例如 odl:belongsTo → "属于"、odl:responsibleFor → "负责"、odl:hasTool → "使用工具"、odl:contains → "包含"、odl:describes → "描述"。禁止输出英文。
 - confidence：EXTRACTED
 - evidence：一句中文说明此关系
 
 【外部引用】
-- 列出所有在边中被引用、但本文件中未完整定义的节点 id（本地名）
+列出所有在边中被引用、但本文件中未完整定义的节点 id（本地名）。
+包括：跨文件实例引用、被继承的父类、属性域/值域中的类、owl:imports 的目标本体。
 
 只输出 JSON，不输出任何其他内容，格式如下：
   nodes: 数组，每个元素包含 id, label, type, summary 及附加中文字段
@@ -141,6 +169,7 @@ def extract(path: str | Path, client=None) -> dict:
     # 为外部引用节点创建 stub，store 后续 merge 会补全
     # 从 ID 前缀推断类型和中文标签
     _STUB_TYPES = {
+        # 实例前缀（Type_Name 模式）
         "Tool_": "工具", "Indicator_": "指标", "Risk_": "风险",
         "Milestone_": "里程碑", "Department_": "部门", "Meeting_": "会议",
         "Document_": "文档", "Theme_": "主题任务", "Person_": "人员",
@@ -155,6 +184,9 @@ def extract(path: str | Path, client=None) -> dict:
                 label = ref_id[len(prefix):]
                 node_type = t
                 break
+        # 本体层启发：无下划线的 id 通常是类或属性定义
+        if not node_type and "_" not in ref_id:
+            node_type = "本体类" if ref_id[:1].isupper() else "对象属性"
         return {"id": ref_id, "label": label, "type": node_type, "summary": ""}
 
     defined_ids = {n["id"] for n in nodes}

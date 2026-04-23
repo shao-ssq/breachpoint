@@ -6,19 +6,23 @@ trigger: /breachpoint
 
 # /breachpoint
 
-将任意目录下的 TTL/RDF 文档转换为可导航的知识图谱。每个文档由 Claude 分析提取概念节点；新文档再与整个已有图谱对比发现跨文档关系——每份文档的每个本体结构都要认真思考，直到找全所有连接。
+将任意目录下的 TTL/RDF 文档转换为可导航的知识图谱。每个文档由 Claude 分析提取实例级概念节点；新文档再与整个已有图谱对比发现跨文档关系——每份文档的每个本体结构都要认真思考，直到找全所有连接。
 
 ## 用法
 
 ```
 /breachpoint                        # 对当前目录执行完整 pipeline
 /breachpoint <path>                 # 对指定路径执行完整 pipeline
-/breachpoint <path> --update        # 增量模式 — 仅处理新增/变更的文档
+/breachpoint <path> --wiki          # 同上，额外生成 wiki/ 文章
+/breachpoint update <path>          # 增量模式 — 仅处理新增/变更的文档
 /breachpoint query "<question>"     # 按关键词搜索图谱
 /breachpoint explain "<concept>"    # 描述某个节点及其连接
 /breachpoint path "<A>" "<B>"       # 两个概念之间的最短路径
 /breachpoint export <format> [path] # 导出图谱 (cypher/graphml/svg/obsidian/json)
 /breachpoint cluster-only [path]    # 重新聚类已有图谱，不重新提取
+/breachpoint watch <path>           # 监听文档变更（写入 needs_update 标志）
+/breachpoint hook install           # 安装 git post-commit hook
+/breachpoint install                # 在 Claude Code 中注册 breachpoint skill
 ```
 
 ## 被调用时必须做的事
@@ -66,11 +70,10 @@ print(json.dumps(result))
 
 ```
 Documents: X files · ~Y triples
-  ttl:   N (.ttl .turtle)
-  n3:    N (.n3)
+  rdf:   N (.ttl .turtle .n3)
 ```
 
-省略数量为 0 的类别。如果 `total_files == 0` 则停止。
+如果 `total_files == 0` 则停止。
 
 如果 `total_triples` > 500,000 或 `total_files` > 150：展示按文件数排序的前 5 个子目录，询问用户在哪个子目录上运行。等待用户回答后再继续。
 
@@ -78,7 +81,15 @@ Documents: X files · ~Y triples
 
 ### 第三步 — 提取概念和关系
 
-**优先使用原生 pipeline。** 直接运行 `python -m breachpoint process INPUT_PATH`——它处理提取、跨文档关系、聚类、以及用内置 `to_html()` 生成 HTML（含侧边栏、搜索、社区过滤、暗色主题）。
+**优先使用原生 pipeline。** 直接运行：
+
+```bash
+$PY -m breachpoint process INPUT_PATH
+# 如需同时生成 wiki 文章：
+# $PY -m breachpoint process INPUT_PATH --wiki
+```
+
+它处理提取、跨文档关系、聚类、以及用内置 `to_html()` 生成 HTML（含侧边栏、搜索、社区过滤、暗色主题）。
 
 如果原生 pipeline 失败（如缺少 `ANTHROPIC_AUTH_TOKEN`、网络错误），再回退到下面的子代理提取方案。
 
@@ -148,35 +159,36 @@ print(f'Cache: {len(files)-len(uncached)} files hit, {len(uncached)} files need 
 每个子代理收到完全相同的提示词（替换 FILE_LIST, CHUNK_NUM, TOTAL_CHUNKS, CACHE_DIR）：
 
 ```
-You are a breachpoint extraction subagent for knowledge documents.
+你是 breachpoint 提取子代理，专门从 TTL/RDF 本体文档提取实例级知识图谱片段。
 
-Read each file listed and extract a knowledge graph fragment. Write results to disk.
+将结果写入磁盘。
 
-Files (chunk CHUNK_NUM of TOTAL_CHUNKS):
+文件列表（chunk CHUNK_NUM / TOTAL_CHUNKS）：
 FILE_LIST
 
-For each file:
-1. Read ALL files in this chunk in a SINGLE parallel batch — issue all Read tool calls in one message. NEVER read files one at a time. Sequential reads make the pipeline 5-10x slower.
-2. Extract named concepts, entities, claims, topics, methods as nodes
-3. Extract relationships between nodes as edges
-4. Also note potential connections to concepts in other documents (you will see their IDs in the existing graph if available)
+对每个文件：
+1. 在一次并行批次中读取本 chunk 内的所有文件 — 所有 Read 调用放在同一条消息中。绝不逐文件串行读取。
+2. 只提取具体实例个体（具名实例），跳过类定义（owl:Class、owl:ObjectProperty 等本体声明）。
+3. 提取节点的所有数据属性（字面量），以中文字段名保存在节点顶层。
+4. 提取所有目标为 URI 的对象属性三元组作为边，relation 必须使用中文动词短语（禁止英文）。
+5. 列出本文件中引用但未定义的外部节点 ID。
 
-Node schema — output exactly this shape:
-{"id": "snake_case_unique_id", "label": "Human Readable Name", "type": "concept|entity|method|claim|topic", "summary": "one sentence description", "source_file": "relative/path/to/file"}
+节点 schema（输出这个精确结构）：
+{"id": "URI本地名（#或最后/之后的部分）", "label": "中文名称（优先rdfs:label，无则从id推导）", "type": "中文类型名（主题任务|人员|项目|部门|工具|指标|风险|里程碑等）", "summary": "综合所有属性的一句完整中文描述（30-80字）", "source_file": "文件相对路径"}
 
-Edge schema — output exactly this shape:
-{"source": "node_id", "target": "node_id", "relation": "describes|supports|contradicts|uses|extends|references|semantically_similar_to", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "evidence": "direct quote or reasoning"}
+边 schema（输出这个精确结构）：
+{"source": "节点id", "target": "节点id", "relation": "中文动词短语（如：属于、负责、使用工具、包含、描述）", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "evidence": "一句中文说明此关系"}
 
-Confidence levels:
-- EXTRACTED: relationship stated explicitly in the document
-- INFERRED: clearly implied by context
-- AMBIGUOUS: possible but uncertain — include it, mark it
+置信度：
+- EXTRACTED：文档中明确陈述的关系
+- INFERRED：从上下文可合理推断
+- AMBIGUOUS：可能存在但不确定——包含但标记
 
-Output ONLY valid JSON matching this schema (no markdown fences, no explanation):
-{"nodes": [...], "edges": [...], "input_tokens": 0, "output_tokens": 0}
+只输出符合此 schema 的有效 JSON（无 markdown fence，无说明）：
+{"nodes": [...], "edges": [...], "external_refs": ["未在本文件定义的节点id列表"]}
 
-Write each individual file's result to: CACHE_DIR/<file_hash>.json  (use the hash from the file list)
-Write the merged chunk result to: breachpoint-out/.bp_chunk_CHUNK_NUM.json
+将每个文件的结果写入：CACHE_DIR/<file_hash>.json（使用文件列表中的 hash）
+将合并后的 chunk 结果写入：breachpoint-out/.bp_chunk_CHUNK_NUM.json
 ```
 
 对于 FILE_LIST 中的每个文件，包含来自 `.bp_uncached.json` 的 hash，以便子代理写入独立的缓存文件。
@@ -199,8 +211,6 @@ cached = json.loads(Path('breachpoint-out/.bp_cached.json').read_text())
 all_nodes = list(cached.get('nodes', []))
 all_edges = list(cached.get('edges', []))
 seen_ids = {n['id'] for n in all_nodes}
-total_input = 0
-total_output = 0
 
 for chunk_file in sorted(Path('breachpoint-out').glob('.bp_chunk_*.json')):
     try:
@@ -210,16 +220,12 @@ for chunk_file in sorted(Path('breachpoint-out').glob('.bp_chunk_*.json')):
                 all_nodes.append(n)
                 seen_ids.add(n['id'])
         all_edges.extend(data.get('edges', []))
-        total_input += data.get('input_tokens', 0)
-        total_output += data.get('output_tokens', 0)
     except Exception as e:
         print(f'warning: {chunk_file.name}: {e}')
 
 Path('breachpoint-out/.bp_extract.json').write_text(json.dumps({
     'nodes': all_nodes,
     'edges': all_edges,
-    'input_tokens': total_input,
-    'output_tokens': total_output,
 }))
 print(f'Extraction complete: {len(all_nodes)} nodes, {len(all_edges)} edges')
 "
@@ -239,20 +245,21 @@ print(f'Extraction complete: {len(all_nodes)} nodes, {len(all_edges)} edges')
 
 子代理提示词：
 ```
-You are a cross-document relationship finder for a knowledge graph.
+你是知识图谱跨文档关系分析专家。
 
-Nodes from this document (SOURCE_FILE):
+本文档节点（SOURCE_FILE）：
 SOURCE_NODES_JSON
 
-Sample of nodes from all other documents:
+其他文档的节点样本：
 OTHER_NODES_JSON
 
-Find relationships between the source nodes and other-document nodes. Only add edges where there is genuine semantic connection: shared concept, contradicting claim, method used in another paper, prerequisite relationship, etc.
+找出源节点与其他文档节点之间有意义的跨文档关系。只在存在真实语义连接时添加边：共享概念、矛盾声明、前后置关系、归属关系等。
+relation 字段必须使用中文动词短语，禁止英文。
 
-Output ONLY valid JSON (no markdown fences):
-{"edges": [{"source": "id", "target": "id", "relation": "...", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "evidence": "..."}]}
+只输出有效 JSON（无 markdown fence）：
+{"edges": [{"source": "id", "target": "id", "relation": "中文动词短语", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "evidence": "一句中文说明"}]}
 
-Write result to: breachpoint-out/.bp_cross_INDEX.json
+将结果写入：breachpoint-out/.bp_cross_INDEX.json
 ```
 
 所有子代理完成后，将跨文档边合并到 `.bp_extract.json`：
@@ -271,8 +278,7 @@ for cross_file in sorted(Path('breachpoint-out').glob('.bp_cross_*.json')):
         print(f'warning: {cross_file.name}: {e}')
 
 Path('breachpoint-out/.bp_extract.json').write_text(json.dumps(extract))
-total_cross = sum(len(json.loads(f.read_text()).get('edges',[])) for f in Path('breachpoint-out').glob('.bp_cross_*.json') if f.exists())
-print(f'Cross-document edges added: {total_cross}')
+print(f'Cross-document edges merged')
 "
 rm -f breachpoint-out/.bp_cross_*.json
 ```
@@ -296,7 +302,7 @@ communities = cluster(G)
 cohesion = score_all(G, communities)
 gods = god_nodes(G, top_n=10, communities=communities)
 labels = {cid: f'社区 {cid}' for cid in communities}
-tokens = {'input': extract.get('input_tokens', 0), 'output': extract.get('output_tokens', 0)}
+tokens = {'input': 0, 'output': 0}
 
 report = generate(G, communities, labels, root='INPUT_PATH', tokens=tokens)
 Path('breachpoint-out/GRAPH_REPORT.md').write_text(report, encoding='utf-8')
@@ -331,7 +337,6 @@ print(f'Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {len(co
 $PY -c "
 import json
 from breachpoint.build import build_from_json
-from breachpoint.cluster import score_all
 from breachpoint.report import generate
 from pathlib import Path
 
@@ -340,7 +345,7 @@ analysis = json.loads(Path('breachpoint-out/.bp_analysis.json').read_text())
 
 G = build_from_json(extract)
 communities = {int(k): v for k, v in analysis['communities'].items()}
-tokens = {'input': extract.get('input_tokens', 0), 'output': extract.get('output_tokens', 0)}
+tokens = {'input': 0, 'output': 0}
 
 labels = LABELS_DICT
 
@@ -374,8 +379,8 @@ Knowledge graph built. Outputs in PATH/breachpoint-out/
 
 然后从 GRAPH_REPORT.md 直接粘贴以下三个部分到聊天中：
 - Hub Nodes (top 5)
-- Surprising Cross-document Connections
-- Suggested Questions
+- Cross-Document Connections
+- Suggested Exploration Questions
 
 不要粘贴完整报告——只贴这三个部分。
 
@@ -385,9 +390,9 @@ Knowledge graph built. Outputs in PATH/breachpoint-out/
 
 ---
 
-## 对于 --update（增量模式）
+## 对于 update（增量模式）
 
-检查 `breachpoint-out/graph.json` 中的 `processed_files` 映射。重新检测语料库，找出 SHA-256 hash 与存储值不同的文件，仅对变更/新增的文件重新运行第三步到第七步，并与已有图谱合并。
+使用 `breachpoint update <path>`。若需手动检查：读取 `breachpoint-out/graph.json` 中的 `processed` 映射（`{"rel_path": "sha256hash"}`）。重新检测语料库，找出 SHA-256 hash 与存储值不同的文件，仅对变更/新增的文件重新运行第三步到第七步，并与已有图谱合并。
 
 ---
 
@@ -409,9 +414,14 @@ except TypeError:
 
 question = 'QUESTION'
 terms = [t.lower() for t in question.split() if len(t) > 2]
-scored = [(sum(1 for t in terms if t in G.nodes[n].get('label','').lower()), n) for n in G.nodes()]
-scored = sorted([(s, n) for s, n in scored if s > 0], reverse=True)
-seeds = [n for _, n in scored[:5]]
+scored = []
+for nid, attrs in G.nodes(data=True):
+    text = f\"{attrs.get('label','')} {attrs.get('summary','')}\".lower()
+    score = sum(1 for t in terms if t in text)
+    if score:
+        scored.append((score, nid))
+scored.sort(reverse=True)
+seeds = [nid for _, nid in scored[:5]]
 
 visited, queue, result = set(), list(seeds), []
 while queue and len(result) < 25:
@@ -422,9 +432,10 @@ while queue and len(result) < 25:
 
 for nid in result[:15]:
     d = G.nodes[nid]
-    print(f'  [{d.get("type","?")}] {d.get("label", nid)}')
-    if d.get('summary'): print(f'    {d["summary"]}')
-    if d.get('source_file'): print(f'    Source: {d["source_file"].split("/")[-1]}')
+    src = d.get('source_file', '').split('/')[-1].split(chr(92))[-1]
+    print(f'  [{d.get(\"type\",\"?\")}] {d.get(\"label\", nid)}')
+    if d.get('summary'): print(f'    {d[\"summary\"]}')
+    if src: print(f'    Source: {src}')
     print()
 " 2>&1
 ```
@@ -478,8 +489,8 @@ parts = [G.nodes[path_nodes[0]].get('label', path_nodes[0])]
 for i in range(len(path_nodes)-1):
     u, v = path_nodes[i], path_nodes[i+1]
     e = G.edges[u, v]
-    conf = f' [{e.get("confidence","")}]' if e.get('confidence') else ''
-    parts.append(f'--{e.get("relation","")} {conf}--> {G.nodes[v].get("label", v)}')
+    conf = f' [{e.get(\"confidence\",\"\")}]' if e.get('confidence') else ''
+    parts.append(f'--{e.get(\"relation\",\"\")}{conf}--> {G.nodes[v].get(\"label\", v)}')
 print(f'Shortest path ({hops} hops): ' + ' '.join(parts))
 " 2>&1
 ```
@@ -522,23 +533,28 @@ print(f'Done — {len(communities)} communities. GRAPH_REPORT.md and graph.json 
 
 ```json
 {
-  "id": "attention_mechanism",
-  "label": "Attention Mechanism",
-  "type": "concept",
-  "summary": "Mechanism allowing models to weigh importance of different input positions.",
-  "source_file": "relative/path/to/file.pdf"
+  "id": "Theme_RuleConsistency",
+  "label": "规则一致性",
+  "type": "主题任务",
+  "summary": "负责确保系统规则在各模块间保持一致，由张三主导，预计本季度完成。",
+  "source_file": "relative/path/to/file.ttl",
+  "状态": "进行中",
+  "优先级": "高",
+  "进度百分比": "60%"
 }
 ```
+
+常见中文类型名：`主题任务`、`人员`、`项目`、`部门`、`工具`、`指标`、`风险`、`里程碑`、`待办`、`会议`、`文档`
 
 ## 边 Schema
 
 ```json
 {
-  "source": "attention_mechanism",
-  "target": "transformer_architecture",
-  "relation": "is core component of",
+  "source": "Theme_RuleConsistency",
+  "target": "Person_ZhangSan",
+  "relation": "负责",
   "confidence": "EXTRACTED",
-  "evidence": "The paper explicitly states attention is the main building block."
+  "evidence": "文档中明确声明张三负责规则一致性主题任务。"
 }
 ```
 
@@ -551,5 +567,5 @@ print(f'Done — {len(communities)} communities. GRAPH_REPORT.md and graph.json 
 
 - 不要发明边。如果不确定，使用 AMBIGUOUS。
 - 不要跳过语料库大小警告。
-- 始终在最终报告中显示 token 成本。
+- 边的 relation 字段必须使用中文动词短语，禁止英文。
 - 优先使用 `python -m breachpoint process <path>` 而非手动提取。
