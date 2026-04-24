@@ -59,8 +59,6 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
     from .analyze import god_nodes
 
     path = Path(args[0]) if args else Path(".")
-    do_wiki = "--wiki" in args
-
     out = _out_dir(path)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -88,7 +86,7 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
         print(f"[{i}/{len(files)}] {rel}", end=" ", flush=True)
 
         try:
-            result = extract(fpath)
+            result = extract(fpath, cache_dir=out / ".cache")
         except Exception as e:
             print(f"  X {e}")
             continue
@@ -125,13 +123,6 @@ def cmd_process(args: list[str], incremental: bool = False) -> None:
     (out / "GRAPH_REPORT.md").write_text(report, encoding="utf-8")
     to_json(G, communities, out / "graph.json")
     to_html(G, communities, out / "graph.html", community_labels=labels)
-
-    if do_wiki:
-        from .wiki import to_wiki
-        wiki_dir = out / "wiki"
-        count = to_wiki(G, communities, wiki_dir, community_labels=labels,
-                        cohesion=cohesion, hub_nodes_data=gods)
-        print(f"  wiki: {count} articles → {wiki_dir}/")
 
     # Clear needs_update flag if present
     flag = out / "needs_update"
@@ -498,9 +489,7 @@ def main() -> None:
             print()
             print("Commands:")
             print("  process <path>              analyse all documents and build knowledge graph")
-            print("    --wiki                      also generate wiki/ articles")
             print("  update  <path>              process only new/changed documents")
-            print("    --wiki                      also generate wiki/ articles")
             print("  query   <question> [path]   search the graph by keyword")
             print("  explain <label> [path]      describe a node and its connections")
             print("  path    <A> <B> [path]      shortest path between two concepts")

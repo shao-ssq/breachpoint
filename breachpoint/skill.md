@@ -13,7 +13,6 @@ trigger: /breachpoint
 ```
 /breachpoint                        # 对当前目录执行完整 pipeline
 /breachpoint <path>                 # 对指定路径执行完整 pipeline
-/breachpoint <path> --wiki          # 同上，额外生成 wiki/ 文章
 /breachpoint update <path>          # 增量模式 — 仅处理新增/变更的文档
 /breachpoint query "<question>"     # 按关键词搜索图谱
 /breachpoint explain "<concept>"    # 描述某个节点及其连接
@@ -59,8 +58,6 @@ mkdir -p breachpoint-out
 
 ```bash
 $(cat breachpoint-out/.bp_python) -m breachpoint process INPUT_PATH
-# 同时生成 wiki：
-# $(cat breachpoint-out/.bp_python) -m breachpoint process INPUT_PATH --wiki
 ```
 
 pipeline 完成后告诉用户：
