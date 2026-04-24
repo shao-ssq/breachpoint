@@ -7,15 +7,6 @@ def detect(*args, **kwargs):
     return _fn(*args, **kwargs)
 
 
-def extract(*args, **kwargs):
-    from .extract import extract as _fn
-    return _fn(*args, **kwargs)
-
-
-def relate(*args, **kwargs):
-    from .relate import relate as _fn
-    return _fn(*args, **kwargs)
-
 
 def build(*args, **kwargs):
     from .build import build as _fn
@@ -37,4 +28,4 @@ def to_html(*args, **kwargs):
     return _fn(*args, **kwargs)
 
 
-__all__ = ["detect", "extract", "relate", "build", "cluster", "to_json", "to_html"]
+__all__ = ["detect", "build", "cluster", "to_json", "to_html"]
