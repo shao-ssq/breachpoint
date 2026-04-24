@@ -49,7 +49,7 @@ print(json.dumps(detect('INPUT_PATH'), ensure_ascii=False))
 cat breachpoint-out/manifest.json
 ```
 
-读取输出的 JSON，其中 `files` 数组包含所有 TTL 文件的 `path` 和 `rel_path`。记录文件列表。
+读取输出的 JSON，其中 `files` 数组包含所有 TTL 文件的 `path` 和 `rel_path`。记录文件列表 `breachpoint-out/manifest.json`。
 
 ### 步骤 3 — 逐文件提取节点和边
 

@@ -30,3 +30,6 @@ packages = ["breachpoint"]
 
 [tool.setuptools.packages.find]
 include = ["breachpoint*"]
+
+[tool.setuptools.package-data]
+breachpoint = ["skill.md"]
