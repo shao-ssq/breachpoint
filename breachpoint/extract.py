@@ -99,7 +99,7 @@ TTL 文件内容：
 """
 
 
-def extract(path: str | Path, client=None) -> dict:
+def extract(path: str | Path, client=None, cache_dir: Path | None = None) -> dict:
     """解析 TTL/RDF 文件，通过 LLM 提取节点和边。
 
     外部引用节点以 stub 形式返回，
@@ -157,4 +157,16 @@ def extract(path: str | Path, client=None) -> dict:
             nodes.append(_make_stub(ref_id))
             defined_ids.add(ref_id)
 
-    return {"nodes": nodes, "edges": edges, "input_tokens": 0, "output_tokens": 0}
+    result = {"nodes": nodes, "edges": edges, "input_tokens": 0, "output_tokens": 0}
+
+    if cache_dir is not None:
+        import hashlib
+        cache_dir = Path(cache_dir)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        h = hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]
+        (cache_dir / f"{h}.json").write_text(
+            json.dumps({"nodes": nodes, "edges": edges}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    return result
