@@ -41,7 +41,7 @@ export ANTHROPIC_MODEL=claude-sonnet-4-...  # 可选，覆盖默认模型
 在 Claude Code 中启用 `/breachpoint` 命令：
 
 ```bash
-breachpoint install
+/breachpoint install
 ```
 
 这一步会：
