@@ -186,49 +186,85 @@ print('HTML written')
 
 ---
 
-## 对于 query
+## /breachpoint query <问题>
+
+精准查询模式，多阶段检索 + 关系路径分析 + 社区感知。
+
+### 步骤 Q1 — 问题解析
+
+Claude 分析用户问题，提取：
+- **核心实体**：问题中的具体名词（系统名、类名、属性名）
+- **关键词**：用于模糊匹配的词（长度 > 1）
+- **查询类型**：
+  - `definition`：定义查询（"X是什么"）
+  - `relation`：关系查询（"X和Y的关系"、"X如何连接到Y"）
+  - `enumeration`：枚举查询（"所有X"、"哪些系统"）
+
+将提取结果记录为 Python 列表格式，用于步骤 Q2。
+
+### 步骤 Q2 — 多阶段节点检索
 
 ```bash
 $(cat breachpoint-out/.bp_python) -c "
 import json
-from networkx.readwrite import json_graph
-from pathlib import Path
+from breachpoint.query import stage2_retrieve
 
-data = json.loads(Path('breachpoint-out/graph.json').read_text(encoding='utf-8'))
-try:
-    G = json_graph.node_link_graph(data, edges='links')
-except TypeError:
-    G = json_graph.node_link_graph(data)
+entities = ENTITIES  # ['实体1', '实体2']
+terms = TERMS        # ['关键词1', '关键词2']
 
-question = 'QUESTION'
-terms = [t.lower() for t in question.split() if len(t) > 2]
-scored = []
-for nid, attrs in G.nodes(data=True):
-    text = f\"{attrs.get('label','')} {attrs.get('summary','')}\".lower()
-    score = sum(1 for t in terms if t in text)
-    if score:
-        scored.append((score, nid))
-scored.sort(reverse=True)
-seeds = [nid for _, nid in scored[:5]]
+results = stage2_retrieve('breachpoint-out/graph.json', entities, terms)
+print(json.dumps(results, ensure_ascii=False, indent=2))
+" > breachpoint-out/query_stage2.json 2>&1
+cat breachpoint-out/query_stage2.json
+```
 
-visited, queue, result = set(), list(seeds), []
-while queue and len(result) < 25:
-    n = queue.pop(0)
-    if n in visited: continue
-    visited.add(n); result.append(n)
-    queue.extend(nb for nb in G.neighbors(n) if nb not in visited)
+读取输出，按优先级 `exact > label > summary > edge` 选取种子节点。
 
-for nid in result[:15]:
-    d = G.nodes[nid]
-    src = d.get('source_file', '').split('/')[-1].split(chr(92))[-1]
-    print(f'  [{d.get(\"type\",\"?\")}] {d.get(\"label\", nid)}')
-    if d.get('summary'): print(f'    {d[\"summary\"]}')
-    if src: print(f'    Source: {src}')
-    print()
+### 步骤 Q3 — 关系路径分析
+
+仅当 Q1 判断为 `relation` 类型时执行。将 Q2 中 exact/label 命中的前两个节点作为 NODE_A 和 NODE_B：
+
+```bash
+$(cat breachpoint-out/.bp_python) -c "
+from breachpoint.query import stage3_paths
+for path in stage3_paths('breachpoint-out/graph.json', 'NODE_A', 'NODE_B'):
+    print(path)
 " 2>&1
 ```
 
-然后用图谱输出回答问题。引用具体事实时注明 `source_file`。
+### 步骤 Q4 — 社区感知扩展
+
+```bash
+$(cat breachpoint-out/.bp_python) -c "
+import json
+from breachpoint.query import stage4_expand
+
+seeds = SEEDS  # 由 Q2 确定的种子节点列表
+output = stage4_expand('breachpoint-out/graph.json', seeds)
+print(json.dumps(output, ensure_ascii=False, indent=2))
+" 2>&1
+```
+
+### 步骤 Q5 — Claude 综合回答
+
+读取 Q2~Q4 的所有输出，整理为以下结构供后续 LLM 使用：
+
+```
+**问题上下文**：原始问题 + 识别到的实体和查询类型
+
+**相关节点**：
+- [类型] 节点名 (来源: file.ttl)
+  摘要内容
+
+**关键关系**：
+- A --[关系]--> B（置信度：EXTRACTED/INFERRED）
+  依据：evidence 内容
+
+**跨文件关联**（如有）：
+- file1.ttl 中的 X 与 file2.ttl 中的 Y 通过 [关系] 连接
+```
+
+引用事实时注明 `source_file`，推断关系标注 `[推断]`。不作最终回答，仅输出结构化上下文。
 
 ---
 
