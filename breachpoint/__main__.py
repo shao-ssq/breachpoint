@@ -505,7 +505,12 @@ def main() -> None:
         cmd = args[0]
         rest = args[1:]
 
-    if cmd == "process":
+    if cmd == "detect":
+        from .detect import detect as _detect
+        root = Path(rest[0]) if rest else Path(".")
+        result = _detect(root)
+        print(json.dumps(result, ensure_ascii=False))
+    elif cmd == "process":
         cmd_process(rest, incremental=False)
     elif cmd == "update":
         cmd_process(rest, incremental=True)

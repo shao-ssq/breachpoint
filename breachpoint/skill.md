@@ -54,10 +54,61 @@ mkdir -p breachpoint-out
 
 **后续所有 bash 块用 `$(cat breachpoint-out/.bp_python)` 替代 `python3`。**
 
-### 步骤 2 — 运行 pipeline
+### 步骤 2 — 发现 TTL 文件
 
 ```bash
-$(cat breachpoint-out/.bp_python) -m breachpoint process INPUT_PATH
+$(cat breachpoint-out/.bp_python) -m breachpoint detect INPUT_PATH > breachpoint-out/manifest.json
+cat breachpoint-out/manifest.json
+```
+
+读取输出的 JSON，其中 `files` 数组包含所有 TTL 文件的 `path` 和 `rel_path`。记录文件列表。
+
+### 步骤 3 — 逐文件提取节点和边
+
+读取 `breachpoint-out/manifest.json` 中 `files` 数组，对其中每个文件的 `path` 字段，使用 Read 工具读取其内容，然后按照下方提取规则直接提取节点和边。
+
+**提取规则：** 
+提取 TTL 文件中的每一个具名资源作为节点，统一处理。
+
+节点包括：
+- owl:Class、owl:NamedIndividual、以及任何有 rdf:type 声明的资源
+- 有数据属性（字面量）或对象属性的资源
+- 被其他资源引用的资源（即使本文件未声明，也作为 stub 节点保留，summary 为空字符串）
+
+**强制语言要求：**
+- 所有 label、summary、relation、type 字段必须使用中文，禁止英文单词或短语
+- summary 必须是一句完整的中文句子（30-80字），不是碎片化关键词
+- relation 必须是中文动词短语，禁止英文动词
+- 没有通用中文译名的英文术语：保留缩写后加中文说明，如"CTSP调度系统"
+
+**节点字段：**
+- `id`：URI 本地名（# 或最后一个 / 之后的部分）
+- `label`：rdfs:label 的中文值优先；无则从 id 推导简洁中文名
+- `type`：根据 rdf:type / 使用模式推断中文类型名（"本体类"、"对象属性"、"系统"、"枚举"、"业务流程"等，不要用"节点"）
+- `summary`：综合该资源的所有声明写一句完整中文描述（30-80字）
+- `source_file`：该文件的 rel_path
+- 数据属性（字面量值）以中文字段名扁平展开到节点顶层
+
+**边字段：**
+- `source` / `target`：节点的 id（本地名）
+- `relation`：从属性名推导的中文动词短语（belongsTo→"属于"、subClassOf→"继承自"、imports→"导入"等）
+- `confidence`：`EXTRACTED`（TTL中显式声明）或 `INFERRED`（由结构推断）
+- `evidence`：一句中文说明此关系的依据
+
+每个文件提取完成后，将结果整理为如下 JSON 结构：
+
+```
+{ "nodes": [...], "edges": [...] }
+```
+
+### 步骤 4 — 合并所有文件的提取结果
+
+将所有文件的 nodes 和 edges 合并为一个 JSON 对象（节点按 id 去重，边按 source+target+relation 去重），写入 `breachpoint-out/extraction.json`。
+
+### 步骤 5 — 构建图谱
+
+```bash
+$(cat breachpoint-out/.bp_python) -m breachpoint build-graph breachpoint-out/extraction.json INPUT_PATH
 ```
 
 pipeline 完成后告诉用户：
@@ -80,8 +131,10 @@ pipeline 完成后告诉用户：
 ## 对于 update（增量模式）
 
 ```bash
-$(cat breachpoint-out/.bp_python) -m breachpoint update INPUT_PATH
+$(cat breachpoint-out/.bp_python) -m breachpoint detect INPUT_PATH
 ```
+
+读取已有的 `breachpoint-out/graph.json`，找出其中 `processed` 字段记录的已处理文件哈希。对未处理或已变更的文件，重复步骤 3-5（build-graph 会自动合并到已有图谱）。
 
 ---
 
