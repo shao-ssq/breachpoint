@@ -202,6 +202,8 @@ Claude 分析用户问题，提取：
 
 将提取结果记录为 Python 列表格式，用于步骤 Q2。
 
+完成后输出：`[Q1 完成] 实体: <entities>，关键词: <terms>，查询类型: <type>`
+
 ### 步骤 Q2 — 多阶段节点检索
 
 ```bash
@@ -220,6 +222,8 @@ cat breachpoint-out/query_stage2.json
 
 读取输出，按优先级 `exact > label > summary > edge` 选取种子节点。
 
+完成后输出：`[Q2 完成] 精确命中: <exact数量>，标签命中: <label数量>，摘要命中: <summary数量>，边命中: <edge数量>，种子节点: <seeds>`
+
 ### 步骤 Q3 — 关系路径分析
 
 仅当 Q1 判断为 `relation` 类型时执行。将 Q2 中 exact/label 命中的前两个节点作为 NODE_A 和 NODE_B：
@@ -231,6 +235,8 @@ for path in stage3_paths('breachpoint-out/graph.json', 'NODE_A', 'NODE_B'):
     print(path)
 " 2>&1
 ```
+
+完成后输出：`[Q3 完成] 找到 <数量> 条路径`（若跳过则输出 `[Q3 跳过] 非关系查询`）
 
 ### 步骤 Q4 — 社区感知扩展
 
@@ -244,6 +250,8 @@ output = stage4_expand('breachpoint-out/graph.json', seeds)
 print(json.dumps(output, ensure_ascii=False, indent=2))
 " 2>&1
 ```
+
+完成后输出：`[Q4 完成] 扩展到 <数量> 个节点，涵盖 <社区数量> 个社区`
 
 ### 步骤 Q5 — Claude 综合回答
 
@@ -265,6 +273,8 @@ print(json.dumps(output, ensure_ascii=False, indent=2))
 ```
 
 引用事实时注明 `source_file`，推断关系标注 `[推断]`。不作最终回答，仅输出结构化上下文。
+
+完成后输出：`[Q5 完成] 已整理 <节点数量> 个相关节点和 <关系数量> 条关键关系`
 
 ---
 
