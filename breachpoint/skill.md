@@ -54,62 +54,45 @@ cat breachpoint-out/manifest.json
 
 读取输出的 JSON，其中 `files` 数组包含所有 TTL 文件的 `path` 和 `rel_path`。记录文件列表 `breachpoint-out/manifest.json`。
 
-### 步骤 3 — 逐文件提取节点和边
+### 步骤 3 — rdflib 精确解析
 
-读取 `breachpoint-out/manifest.json` 中 `files` 数组，**为每个文件启动一个独立子代理并行处理**：用 Agent 工具同时派发所有文件，每个子代理只处理一个文件，完成后返回该文件的提取结果 JSON。等所有子代理完成后进入步骤 4。
+读取 `breachpoint-out/manifest.json` 中 `files` 数组，解析所有 TTL 文件（summary 已从 TTL 中提取），直接写入 `extraction.json`：
 
-每个子代理的任务指令：
-> 读取文件 `<path>`（rel_path: `<rel_path>`），按下方提取规则提取所有节点和边，返回 `{ "nodes": [...], "edges": [...] }` JSON，不要写入任何文件。
+```bash
+$(cat breachpoint-out/.bp_python) -c "
+import json
+from pathlib import Path
+from breachpoint.parse import parse_ttl
 
-**提取规则：** 
-提取 TTL 文件中的每一个具名资源作为节点，统一处理。
+manifest = json.loads(Path('breachpoint-out/manifest.json').read_text(encoding='utf-8'))
+files = manifest['files']
 
-节点包括：
-- owl:Class、owl:NamedIndividual、以及任何有 rdf:type 声明的资源
-- 有数据属性（字面量）或对象属性的资源
-- 被其他资源引用的资源（即使本文件未声明，也作为 stub 节点保留，summary 为空字符串）
+all_nodes, all_edges = {}, {}
+for f in files:
+    result = parse_ttl(f['path'], f['rel_path'])
+    for n in result['nodes']:
+        all_nodes.setdefault(n['id'], n)
+    for e in result['edges']:
+        key = (e.get('source'), e.get('target'), e.get('relation'))
+        all_edges.setdefault(key, e)
 
-**强制语言要求：**
-- 所有 label、summary、relation、type 字段必须使用中文，禁止英文单词或短语
-- summary 必须是一句完整的中文句子（30-80字），不是碎片化关键词
-- relation 必须是中文动词短语，禁止英文动词
-- 没有通用中文译名的英文术语：保留缩写后加中文说明，如"CTSP调度系统"
-
-**节点字段：**
-- `id`：URI 本地名（# 或最后一个 / 之后的部分）
-- `label`：rdfs:label 的中文值优先；无则从 id 推导简洁中文名
-- `type`：根据 rdf:type / 使用模式推断中文类型名（"本体类"、"对象属性"、"系统"、"枚举"、"业务流程"等，不要用"节点"）
-- `summary`：综合该资源的所有声明写一句完整中文描述（30-80字）
-- `source_file`：该文件的 rel_path
-- 数据属性（字面量值）以中文字段名扁平展开到节点顶层
-
-**边字段：**
-- `source` / `target`：节点的 id（本地名）
-- `relation`：从属性名推导的中文动词短语（belongsTo→"属于"、subClassOf→"继承自"、imports→"导入"等）
-- `confidence`：`EXTRACTED`（TTL中显式声明）或 `INFERRED`（由结构推断）
-- `evidence`：一句中文说明此关系的依据
-
-每个文件提取完成后，将结果整理为如下 JSON 结构：
-
-```
-{ "nodes": [...], "edges": [...] }
+result = {'nodes': list(all_nodes.values()), 'edges': list(all_edges.values())}
+Path('breachpoint-out/extraction.json').write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+print(f'extraction.json: {len(result[\"nodes\"])} nodes, {len(result[\"edges\"])} edges')
+"
 ```
 
-### 步骤 4 — 合并所有文件的提取结果
-
-将所有文件的 nodes 和 edges 合并为一个 JSON 对象（节点按 id 去重，边按 source+target+relation 去重），写入 `breachpoint-out/extraction.json`。
-
-### 步骤 5 — 补全遗漏的跨节点关联关系
+### 步骤 4 — 深度提炼关联边（重要）
 
 读取 `breachpoint-out/extraction.json`，对所有节点两两审查，识别可能遗漏的关联边：
 
 - 对比节点的 `label`、`summary`、`type` 字段，找出语义上存在关联但尚无边连接的节点对
-- 重点检查：同类型节点间的继承/组合关系、跨文件节点间的引用关系、stub 节点与已有节点的潜在匹配
+- 重点检查：同类型节点间的继承/组合关系、节点间的引用关系、stub 节点与已有节点的潜在匹配
 - 对每条新发现的边，设置 `confidence: "INFERRED"`，并用一句中文写明 `evidence`
 
 将补全的边追加到 `extraction.json` 的 `edges` 数组（按 source+target+relation 去重，不覆盖已有 `EXTRACTED` 边）。
 
-### 步骤 6 — 构建图谱
+### 步骤 5 — 构建图谱
 
 读取 `breachpoint-out/extraction.json`，执行以下步骤：
 
@@ -136,7 +119,7 @@ print(f'Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {len(co
 " 2>&1
 ```
 
-### 步骤 7 — 生成报告
+### 步骤 6 — 生成报告
 
 ```bash
 $(cat breachpoint-out/.bp_python) -c "
@@ -156,7 +139,7 @@ print('Report written')
 " 2>&1
 ```
 
-### 步骤 8 — 生成交互式 HTML
+### 步骤 7 — 生成交互式 HTML
 
 ```bash
 $(cat breachpoint-out/.bp_python) -c "
@@ -175,7 +158,7 @@ print('HTML written')
 " 2>&1
 ```
 
-### 步骤 9 — 告知用户
+### 步骤 8 — 告知用户
 
 ```
 知识图谱已构建完成。输出文件在 PATH/breachpoint-out/
