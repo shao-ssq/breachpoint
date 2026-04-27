@@ -177,8 +177,6 @@ print('HTML written')
 
 ### 步骤 9 — 告知用户
 
-告诉用户：
-
 ```
 知识图谱已构建完成。输出文件在 PATH/breachpoint-out/
 
@@ -275,21 +273,17 @@ print(json.dumps(output, ensure_ascii=False, indent=2))
 
 ```
 **相关节点**（共 N 个）：
-- [类型] 节点名 (来源: file.ttl)
+- [类型] 节点名
   摘要内容
   连接：A --[关系]--> B, ...
 
 **关键关系**：
 - A --[关系]--> B（EXTRACTED/INFERRED）
   依据：evidence 内容
-
-**跨文件关联**（如有）：
-- file1.ttl 中的 X 与 file2.ttl 中的 Y 通过 [关系] 连接
 ```
 
 规则：
 - 节点按 Q4 的 score 降序排列，最多输出 10 个
-- 推断关系标注 `[推断]`，引用事实注明 `source_file`
 - 不作额外解释，仅输出结构化内容供调用方使用
 ---
 
