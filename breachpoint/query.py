@@ -17,19 +17,19 @@ def load_graph(graph_path='breachpoint-out/graph.json'):
 def stage2_retrieve(graph_path, entities, terms):
     """Multi-stage node retrieval."""
     G = load_graph(graph_path)
-    results = {'exact': [], 'label': [], 'summary': [], 'edge': []}
+    results = {'exact': [], 'label': [], 'comment': [], 'edge': []}
 
     for nid, attrs in G.nodes(data=True):
         label = attrs.get('label', '').lower()
-        summary = attrs.get('summary', '').lower()
+        comment = attrs.get('comment', '').lower()
         nid_lower = nid.lower()
 
         if any(e.lower() in label or e.lower() in nid_lower for e in entities):
             results['exact'].append(nid)
         elif any(t in label for t in terms):
             results['label'].append(nid)
-        elif any(t in summary for t in terms):
-            results['summary'].append(nid)
+        elif any(t in comment for t in terms):
+            results['comment'].append(nid)
 
     for u, v, edata in G.edges(data=True):
         rel = edata.get('relation', '').lower()
@@ -45,60 +45,90 @@ def stage2_retrieve(graph_path, entities, terms):
     return results
 
 
-def stage3_paths(graph_path, node_a, node_b, cutoff=4, max_paths=3):
-    """Find paths between two nodes."""
-    G = load_graph(graph_path)
-    try:
-        paths = list(nx.all_simple_paths(G, node_a, node_b, cutoff=cutoff))
-        result = []
-        for path in paths[:max_paths]:
-            chain = []
-            for i in range(len(path)-1):
-                edata = G.edges[path[i], path[i+1]]
-                chain.append(f'{path[i]} --[{edata.get("relation","?")}]--> {path[i+1]}')
-            result.append(' | '.join(chain))
-        return result
-    except Exception as e:
-        return [f'无路径: {e}']
-
-
-def stage4_expand(graph_path, seeds, top_n=20):
-    """Community-aware expansion."""
+def stage3_coarse(graph_path, seeds, hops=3):
+    """Coarse expansion: BFS up to `hops` from seeds, return all reachable nodes with edges."""
     G = load_graph(graph_path)
     seeds = set(seeds)
-    seed_communities = {G.nodes[n].get('community') for n in seeds if G.nodes[n].get('community') is not None}
+    visited = set()
+    frontier = seeds & set(G.nodes)
+    for _ in range(hops):
+        next_frontier = set()
+        for n in frontier:
+            for nb in G.neighbors(n):
+                if nb not in visited and nb not in frontier:
+                    next_frontier.add(nb)
+        visited |= frontier
+        frontier = next_frontier
+    visited |= frontier
+
+    nodes = []
+    for nid in visited:
+        d = G.nodes[nid]
+        nodes.append({
+            'id': nid,
+            'label': d.get('label', nid),
+            'type': d.get('type', '?'),
+            'comment': d.get('comment', ''),
+            'community': d.get('community'),
+            'is_seed': nid in seeds,
+        })
+
+    edges = []
+    for u, v, edata in G.edges(data=True):
+        if u in visited and v in visited:
+            edges.append({'from': u, 'to': v, 'relation': edata.get('relation'), 'confidence': edata.get('confidence')})
+
+    return {'nodes': nodes, 'edges': edges}
+
+
+def stage5_refine(graph_path, targets, hops=5, top_n=30):
+    """Fine-grained expansion: deep neighborhood + community-aware scoring."""
+    G = load_graph(graph_path)
+    targets = set(targets) & set(G.nodes)
+    target_communities = {G.nodes[n].get('community') for n in targets if G.nodes[n].get('community') is not None}
+
+    # BFS up to hops
+    visited = set()
+    frontier = set(targets)
+    for _ in range(hops):
+        next_f = set()
+        for n in frontier:
+            for nb in G.neighbors(n):
+                if nb not in visited and nb not in frontier:
+                    next_f.add(nb)
+        visited |= frontier
+        frontier = next_f
+    visited |= frontier
 
     scored = []
-    for nid, attrs in G.nodes(data=True):
-        if nid in seeds:
-            scored.append((10, nid))
-            continue
-        c = attrs.get('community')
-        neighbor_score = sum(1 for nb in G.neighbors(nid) if nb in seeds)
-        score = (3 if c in seed_communities else 1) + neighbor_score * 2
-        if score > 1:
-            scored.append((score, nid))
+    for nid in visited:
+        d = G.nodes[nid]
+        c = d.get('community')
+        nb_score = sum(1 for nb in G.neighbors(nid) if nb in targets)
+        score = (10 if nid in targets else 0) + (3 if c in target_communities else 1) + nb_score * 2
+        scored.append((score, nid))
 
     scored.sort(reverse=True)
-    output = []
     top_nodes = {n for _, n in scored[:top_n]}
 
+    output = []
     for score, nid in scored[:top_n]:
         d = G.nodes[nid]
         src = d.get('source_file', '').split('/')[-1].split('\\')[-1]
-        connections = [
-            f'{nb} [{G.edges[nid, nb].get("relation","?")}]'
-            for nb in G.neighbors(nid)
-            if nb in top_nodes
-        ][:3]
+        connections = []
+        for nb in G.neighbors(nid):
+            if nb in top_nodes:
+                edata = G.edges[nid, nb]
+                connections.append(f'{nb} [{edata.get("relation","?")}]')
         output.append({
             'id': nid,
             'label': d.get('label', nid),
-            'type': d.get('type','?'),
-            'summary': d.get('summary',''),
+            'type': d.get('type', '?'),
+            'comment': d.get('comment', ''),
             'source': src,
             'community': d.get('community'),
-            'connections': connections
+            'score': score,
+            'connections': connections[:5],
         })
 
     return output
