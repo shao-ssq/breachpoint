@@ -29,6 +29,14 @@ _SKIP_LITERAL_PREDICATES = frozenset({
     str(RDFS.label), str(RDFS.comment), str(OWL.versionInfo),
 })
 
+_SKIP_OBJECT_PREDICATES = frozenset({
+    str(RDF.type), str(RDFS.domain), str(RDFS.range),
+    str(RDFS.subClassOf), str(OWL.equivalentClass), str(OWL.disjointWith),
+    str(RDFS.seeAlso), str(RDFS.isDefinedBy), str(OWL.imports),
+    str(OWL.inverseOf), str(OWL.onProperty), str(OWL.someValuesFrom),
+    str(OWL.allValuesFrom), str(OWL.hasValue),
+})
+
 
 def _local_name(uri: str) -> str:
     for sep in ("#", "/"):
@@ -109,7 +117,7 @@ def parse_ttl(path: str | Path, rel_path: str) -> dict:
             "id": nid,
             "label": _zh_label(g, subj),
             "type": _resource_type(g, subj, class_labels),
-            "summary": _zh_comment(g, subj),
+            "comment": _zh_comment(g, subj),
             "source_file": rel_path,
         }
         node.update(_data_props(g, subj))
@@ -121,14 +129,31 @@ def parse_ttl(path: str | Path, rel_path: str) -> dict:
             continue
         pid = _local_name(str(prop))
         plabel = _zh_label(g, prop)
-        for domain in g.objects(prop, RDFS.domain):
-            for range_ in g.objects(prop, RDFS.range):
+        domains = list(g.objects(prop, RDFS.domain))
+        ranges = list(g.objects(prop, RDFS.range))
+        for domain in domains:
+            for range_ in ranges:
                 src, tgt = _local_name(str(domain)), _local_name(str(range_))
                 edges.append({
                     "source": src, "target": tgt, "relation": plabel,
                     "confidence": "EXTRACTED",
                     "evidence": f"对象属性 {pid} 声明 domain={src}, range={tgt}",
                 })
+        # Connect property node itself to domain and range
+        for domain in domains:
+            src = _local_name(str(domain))
+            edges.append({
+                "source": pid, "target": src, "relation": "定义域为",
+                "confidence": "EXTRACTED",
+                "evidence": f"对象属性 {pid} rdfs:domain {src}",
+            })
+        for range_ in ranges:
+            tgt = _local_name(str(range_))
+            edges.append({
+                "source": pid, "target": tgt, "relation": "值域为",
+                "confidence": "EXTRACTED",
+                "evidence": f"对象属性 {pid} rdfs:range {tgt}",
+            })
 
     # Edges from datatype property domain/range
     for prop in g.subjects(RDF.type, OWL.DatatypeProperty):
@@ -136,14 +161,24 @@ def parse_ttl(path: str | Path, rel_path: str) -> dict:
             continue
         pid = _local_name(str(prop))
         plabel = _zh_label(g, prop)
-        for domain in g.objects(prop, RDFS.domain):
-            for range_ in g.objects(prop, RDFS.range):
+        domains = list(g.objects(prop, RDFS.domain))
+        ranges = list(g.objects(prop, RDFS.range))
+        for domain in domains:
+            for range_ in ranges:
                 src, tgt = _local_name(str(domain)), _local_name(str(range_))
                 edges.append({
                     "source": src, "target": tgt, "relation": plabel,
                     "confidence": "EXTRACTED",
                     "evidence": f"数据属性 {pid} 声明 domain={src}, range={tgt}",
                 })
+        # Connect property node itself to domain
+        for domain in domains:
+            src = _local_name(str(domain))
+            edges.append({
+                "source": pid, "target": src, "relation": "定义域为",
+                "confidence": "EXTRACTED",
+                "evidence": f"数据属性 {pid} rdfs:domain {src}",
+            })
 
     # Edges from structural predicates (subClassOf, imports, etc.)
     for subj, pred, obj in g:
@@ -159,6 +194,23 @@ def parse_ttl(path: str | Path, rel_path: str) -> dict:
                 "confidence": "EXTRACTED",
                 "evidence": f"TTL中显式声明 {_local_name(str(pred))}",
             })
+
+    # Edges from custom domain predicates (instance-level triples)
+    for subj, pred, obj in g:
+        if not isinstance(subj, URIRef) or not isinstance(obj, URIRef):
+            continue
+        ps = str(pred)
+        if ps in _SKIP_OBJECT_PREDICATES or ps in _EDGE_PREDICATES:
+            continue
+        src, tgt = _local_name(str(subj)), _local_name(str(obj))
+        if src == tgt or not src or not tgt:
+            continue
+        relation = _zh_label(g, pred) if isinstance(pred, URIRef) else _local_name(ps)
+        edges.append({
+            "source": src, "target": tgt, "relation": relation,
+            "confidence": "EXTRACTED",
+            "evidence": f"TTL实例三元组 {_local_name(ps)}",
+        })
 
     # Deduplicate edges
     seen: set[tuple] = set()
