@@ -18,23 +18,26 @@ def stage2_retrieve(graph_path, entities, terms):
     """Multi-stage node retrieval."""
     G = load_graph(graph_path)
     results = {'exact': [], 'label': [], 'comment': [], 'edge': []}
+    entities_lower = [e.lower() for e in entities]
+    terms_lower = [t.lower() for t in terms]
 
     for nid, attrs in G.nodes(data=True):
         label = attrs.get('label', '').lower()
         comment = attrs.get('comment', '').lower()
         nid_lower = nid.lower()
 
-        if any(e.lower() in label or e.lower() in nid_lower for e in entities):
+        if any(e == label or e == nid_lower for e in entities_lower):
             results['exact'].append(nid)
-        elif any(t in label for t in terms):
-            results['label'].append(nid)
-        elif any(t in comment for t in terms):
-            results['comment'].append(nid)
+        else:
+            if any(t in label for t in terms_lower):
+                results['label'].append(nid)
+            if any(t in comment for t in terms_lower):
+                results['comment'].append(nid)
 
     for u, v, edata in G.edges(data=True):
         rel = edata.get('relation', '').lower()
         ev = edata.get('evidence', '').lower()
-        if any(t in rel or t in ev for t in terms):
+        if any(t in rel or t in ev for t in terms_lower):
             results['edge'].append({
                 'from': u, 'to': v,
                 'relation': edata.get('relation'),
@@ -54,7 +57,7 @@ def stage3_coarse(graph_path, seeds, hops=3):
     for _ in range(hops):
         next_frontier = set()
         for n in frontier:
-            for nb in G.neighbors(n):
+            for nb in set(G.successors(n)) | set(G.predecessors(n)):
                 if nb not in visited and nb not in frontier:
                     next_frontier.add(nb)
         visited |= frontier
@@ -78,7 +81,7 @@ def stage3_coarse(graph_path, seeds, hops=3):
         if u in visited and v in visited:
             edges.append({'from': u, 'to': v, 'relation': edata.get('relation'), 'confidence': edata.get('confidence')})
 
-    return {'nodes': nodes, 'edges': edges}
+    return {'nodes': nodes, 'links': edges}
 
 
 def stage5_refine(graph_path, targets, hops=5, top_n=30):
@@ -93,7 +96,7 @@ def stage5_refine(graph_path, targets, hops=5, top_n=30):
     for _ in range(hops):
         next_f = set()
         for n in frontier:
-            for nb in G.neighbors(n):
+            for nb in set(G.successors(n)) | set(G.predecessors(n)):
                 if nb not in visited and nb not in frontier:
                     next_f.add(nb)
         visited |= frontier
@@ -104,7 +107,7 @@ def stage5_refine(graph_path, targets, hops=5, top_n=30):
     for nid in visited:
         d = G.nodes[nid]
         c = d.get('community')
-        nb_score = sum(1 for nb in G.neighbors(nid) if nb in targets)
+        nb_score = sum(1 for nb in G.successors(nid) if nb in targets) + sum(1 for nb in G.predecessors(nid) if nb in targets)
         score = (10 if nid in targets else 0) + (3 if c in target_communities else 1) + nb_score * 2
         scored.append((score, nid))
 
@@ -116,10 +119,14 @@ def stage5_refine(graph_path, targets, hops=5, top_n=30):
         d = G.nodes[nid]
         src = d.get('source_file', '').split('/')[-1].split('\\')[-1]
         connections = []
-        for nb in G.neighbors(nid):
+        for nb in G.successors(nid):
             if nb in top_nodes:
                 edata = G.edges[nid, nb]
-                connections.append(f'{nb} [{edata.get("relation","?")}]')
+                connections.append(f'→{nb} [{edata.get("relation","?")}]')
+        for nb in G.predecessors(nid):
+            if nb in top_nodes:
+                edata = G.edges[nb, nid]
+                connections.append(f'←{nb} [{edata.get("relation","?")}]')
         output.append({
             'id': nid,
             'label': d.get('label', nid),
