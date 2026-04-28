@@ -57,7 +57,7 @@ def stage3_coarse(graph_path, seeds, hops=3):
     for _ in range(hops):
         next_frontier = set()
         for n in frontier:
-            for nb in set(G.successors(n)) | set(G.predecessors(n)):
+            for nb in G.neighbors(n):
                 if nb not in visited and nb not in frontier:
                     next_frontier.add(nb)
         visited |= frontier
@@ -96,7 +96,7 @@ def stage5_refine(graph_path, targets, hops=5, top_n=30):
     for _ in range(hops):
         next_f = set()
         for n in frontier:
-            for nb in set(G.successors(n)) | set(G.predecessors(n)):
+            for nb in G.neighbors(n):
                 if nb not in visited and nb not in frontier:
                     next_f.add(nb)
         visited |= frontier
@@ -107,7 +107,7 @@ def stage5_refine(graph_path, targets, hops=5, top_n=30):
     for nid in visited:
         d = G.nodes[nid]
         c = d.get('community')
-        nb_score = sum(1 for nb in G.successors(nid) if nb in targets) + sum(1 for nb in G.predecessors(nid) if nb in targets)
+        nb_score = sum(1 for nb in G.neighbors(nid) if nb in targets)
         score = (10 if nid in targets else 0) + (3 if c in target_communities else 1) + nb_score * 2
         scored.append((score, nid))
 
@@ -119,14 +119,10 @@ def stage5_refine(graph_path, targets, hops=5, top_n=30):
         d = G.nodes[nid]
         src = d.get('source_file', '').split('/')[-1].split('\\')[-1]
         connections = []
-        for nb in G.successors(nid):
+        for nb in G.neighbors(nid):
             if nb in top_nodes:
                 edata = G.edges[nid, nb]
                 connections.append(f'→{nb} [{edata.get("relation","?")}]')
-        for nb in G.predecessors(nid):
-            if nb in top_nodes:
-                edata = G.edges[nb, nid]
-                connections.append(f'←{nb} [{edata.get("relation","?")}]')
         output.append({
             'id': nid,
             'label': d.get('label', nid),
