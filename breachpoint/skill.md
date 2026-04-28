@@ -273,92 +273,43 @@ print('HTML written')
 
 ## /breachpoint query <问题>
 
-精准查询模式，多阶段检索 + 关系路径分析 + 社区感知。
+精准查询模式，多阶段检索 + 关系路径分析 + 社区感知。**每步必须等上一步完成并读取其输出后才能继续。**
 
-### 步骤 1 — 问题解析
+### 步骤 Q1 — 问题解析
 
 Claude 分析用户问题，提取：
-- **核心实体**：问题中的具体名词（系统名、类名、属性名）
-- **关键词**：用于模糊匹配的词（长度 > 1）
+- **核心实体** `ENTITIES`：问题中的具体名词（系统名、类名、属性名）
+- **关键词** `TERMS`：用于模糊匹配的词（长度 > 1）
 
-将提取结果记录为 Python 列表格式，用于步骤 Q2。
+将提取结果记录为 Python 列表，**直接内联到 Q2 的 bash 块中**。
 
-完成后输出：`[1 完成] 实体: <entities>，关键词: <terms>`
+输出：`[Q1] 实体: <ENTITIES>，关键词: <TERMS>`
 
-### 步骤 2 — 多阶段节点检索
+### 步骤 Q2 — 多阶段节点检索
+
+将 Q1 的 `ENTITIES` 和 `TERMS` 填入下方脚本后执行：
 
 ```bash
 $(cat breachpoint-out/.bp_python) -c "
-import json
+import json, sys
 from breachpoint.query import stage2_retrieve
 
-entities = ENTITIES  # ['实体1', '实体2']
-terms = TERMS        # ['关键词1', '关键词2']
+entities = ENTITIES  # 从 Q1 填入，如 ['Customer', '账户']
+terms    = TERMS     # 从 Q1 填入，如 ['持有', '关联']
 
 results = stage2_retrieve('breachpoint-out/graph.json', entities, terms)
-import sys; sys.stdout.buffer.write(json.dumps(results, ensure_ascii=False, indent=2).encode('utf-8'))
+sys.stdout.buffer.write(json.dumps(results, ensure_ascii=False, indent=2).encode('utf-8'))
 " > breachpoint-out/query_stage2.json 2>&1
 cat breachpoint-out/query_stage2.json
 ```
 
-读取输出，按优先级 `exact > label > comment > edge` 选取种子节点。
+**读取输出**，按优先级 `exact > label > comment > edge` 选取种子节点，记为 `SEEDS`。
 
-完成后输出：`[2 完成] 精确命中: <exact数量>，标签命中: <label数量>，注释命中: <comment数量>，边命中: <edge数量>，种子节点: <seeds>`
-
-### 步骤 3 — 粗筛扩展
-
-以 Q2 种子节点为起点，3跳 BFS 大范围扩展，获取候选节点和边：
-
-```bash
-$(cat breachpoint-out/.bp_python) -c "
-import json
-from breachpoint.query import stage3_coarse
-
-seeds = SEEDS  # 由 Q2 确定的种子节点列表
-output = stage3_coarse('breachpoint-out/graph.json', seeds)
-import sys; sys.stdout.buffer.write(json.dumps(output, ensure_ascii=False, indent=2).encode('utf-8'))
-" > breachpoint-out/query_stage3.json 2>&1
-cat breachpoint-out/query_stage3.json
-```
-
-完成后输出：`[3 完成] 粗筛节点: <数量>，边: <数量>`
-
-> `query_stage3.json` 是 node-link 格式，边字段为 **`links`**，不是 `edges`。
-
-### 步骤 4 — 精确目标判断
-
-Claude 阅读 Q3 输出，结合用户问题，从候选节点中判断出**最相关的精确目标节点**（通常 2-5 个），记为 TARGETS。
-
-完成后输出：`[4 完成] 精确目标: <TARGETS>`
-
-### 步骤 5 — 精筛 + 社区感知扩展
-
-对 TARGETS 做 5 跳邻域扩展，融合社区感知评分：
-
-```bash
-$(cat breachpoint-out/.bp_python) -c "
-import json
-from breachpoint.query import stage5_refine
-
-targets = TARGETS  # 由 Q4 确定的精确目标节点
-output = stage5_refine('breachpoint-out/graph.json', targets)
-import sys; sys.stdout.buffer.write(json.dumps(output, ensure_ascii=False, indent=2).encode('utf-8'))
-" > breachpoint-out/query_stage5.json 2>&1
-cat breachpoint-out/query_stage5.json
-```
-
-完成后输出：`[5 完成] 精筛节点: <数量>，涵盖 <社区数量> 个社区`
-
-> `query_stage5.json` 是 node-link 格式，边字段为 **`links`**，不是 `edges`。
-
-### 步骤 6 — 回答问题
-
-**若 Q2 命中总数为 0**，输出澄清请求并终止：
-
+**若命中总数为 0**，立即终止并输出：
 ```
 未能在知识图谱中找到与以下内容相关的节点：
-- 实体：<entities>
-- 关键词：<terms>
+- 实体：<ENTITIES>
+- 关键词：<TERMS>
 
 请尝试：
 1. 使用更具体的实体名称（如系统名、类名）
@@ -366,12 +317,71 @@ cat breachpoint-out/query_stage5.json
 3. 运行 /breachpoint 确认图谱已构建
 ```
 
-**检索成功时**，综合 Q2-Q5 所有阶段结果，直接回答用户问题：
-- 用通俗易懂的语言回答，避免术语堆砌，像向非技术人员解释一样清晰
+输出：`[Q2] 精确命中: <exact数量>，标签命中: <label数量>，注释命中: <comment数量>，边命中: <edge数量> → 种子节点 SEEDS: <seeds>`
+
+### 步骤 Q3 — 粗筛扩展
+
+将 Q2 输出的 `SEEDS` 填入下方脚本，3跳 BFS 大范围扩展：
+
+```bash
+$(cat breachpoint-out/.bp_python) -c "
+import json, sys
+from breachpoint.query import stage3_coarse
+
+seeds = SEEDS  # 从 Q2 填入
+output = stage3_coarse('breachpoint-out/graph.json', seeds)
+sys.stdout.buffer.write(json.dumps(output, ensure_ascii=False, indent=2).encode('utf-8'))
+" > breachpoint-out/query_stage3.json 2>&1
+cat breachpoint-out/query_stage3.json
+```
+
+> `query_stage3.json` 是 node-link 格式，边字段为 **`links`**，不是 `edges`。
+
+**读取输出**，记录候选节点列表供 Q4 使用。
+
+输出：`[Q3] 粗筛节点: <数量>，边: <数量>`
+
+### 步骤 Q4 — 精确目标判断
+
+Claude 阅读 Q3 的候选节点（id / label / comment / type），结合用户原始问题，从中选出**最相关的精确目标节点**（通常 2-5 个），记为 `TARGETS`。
+
+判断依据：
+- 节点 label/comment 与问题语义最接近
+- 优先选 Q2 `exact` 命中节点
+- 排除仅因路径经过而出现的无关中间节点
+
+输出：`[Q4] 精确目标 TARGETS: <TARGETS>`
+
+### 步骤 Q5 — 精筛 + 社区感知扩展
+
+将 Q4 输出的 `TARGETS` 填入下方脚本，5跳邻域扩展 + 社区感知评分：
+
+```bash
+$(cat breachpoint-out/.bp_python) -c "
+import json, sys
+from breachpoint.query import stage5_refine
+
+targets = TARGETS  # 从 Q4 填入
+output = stage5_refine('breachpoint-out/graph.json', targets)
+sys.stdout.buffer.write(json.dumps(output, ensure_ascii=False, indent=2).encode('utf-8'))
+" > breachpoint-out/query_stage5.json 2>&1
+cat breachpoint-out/query_stage5.json
+```
+
+> `query_stage5.json` 是 node-link 格式，边字段为 **`links`**，不是 `edges`。
+
+**读取输出**，按 `score` 降序排列节点，供 Q6 回答使用。
+
+输出：`[Q5] 精筛节点: <数量>，涵盖 <社区数量> 个社区`
+
+### 步骤 Q6 — 回答问题
+
+综合 Q2–Q5 所有阶段结果，直接回答用户问题：
 - 先给出一句话结论，再展开说明
-- 用类比、举例等方式帮助理解复杂关系
+- 用通俗语言，避免术语堆砌，像向非技术人员解释一样清晰
+- 用类比、举例帮助理解复杂关系
 - 引用具体节点名、关系、evidence 作为依据，但要解释其含义而非直接罗列
 - 节点按 Q5 的 score 降序，最多引用 10 个
-- 不输出原始 JSON
+- 不输出 原始 JSON、SQL、代码片段等技术查询语句
 ---
 
