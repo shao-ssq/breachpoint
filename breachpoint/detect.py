@@ -1,14 +1,16 @@
-"""文档文件发现 — BreachPoint（仅支持 TTL/RDF 格式）。
+"""文档文件发现 — BreachPoint。
 
-扫描目录中的 RDF/Turtle 文件并返回结构化清单。
+扫描目录中的 RDF/Turtle 或 Markdown 文件并返回结构化清单。
 
 公开 API:
-    detect(root) -> dict
+    detect(root) -> dict          # TTL/RDF 文件
+    detect_md(root) -> dict       # Markdown 文件
 """
 from __future__ import annotations
 from pathlib import Path
 
 TTL_EXTENSIONS: frozenset[str] = frozenset({".ttl", ".turtle", ".n3"})
+MD_EXTENSIONS: frozenset[str] = frozenset({".md", ".markdown"})
 
 SKIP_DIRS: frozenset[str] = frozenset({
     ".git", ".svn", "__pycache__", "node_modules", ".venv", "venv",
@@ -65,4 +67,42 @@ def detect(root: str | Path) -> dict:
         "files": files,
         "by_category": {"rdf": len(files)},
         "skipped_sensitive": [],
+    }
+
+
+def _count_words(path: Path) -> int:
+    try:
+        return len(path.read_text(encoding="utf-8", errors="ignore").split())
+    except Exception:
+        return 0
+
+
+def detect_md(root: str | Path) -> dict:
+    """扫描 *root* 目录，返回所有 Markdown 文件的清单。"""
+    root = Path(root).resolve()
+    files: list[dict] = []
+
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        ext = path.suffix.lower()
+        if ext not in MD_EXTENSIONS:
+            continue
+        words = _count_words(path)
+        files.append({
+            "path": str(path),
+            "rel_path": str(path.relative_to(root)),
+            "ext": ext,
+            "category": "markdown",
+            "words": words,
+        })
+
+    return {
+        "root": str(root),
+        "total_files": len(files),
+        "total_words": sum(f["words"] for f in files),
+        "files": files,
+        "by_category": {"markdown": len(files)},
     }

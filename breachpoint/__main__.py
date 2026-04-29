@@ -1,6 +1,5 @@
 """breachpoint CLI — `breachpoint install` sets up the skill."""
 from __future__ import annotations
-import json
 import platform
 import shutil
 import sys

@@ -10,12 +10,14 @@ trigger: /breachpoint
 - 不要发明边。如果不确定，使用 AMBIGUOUS。
 - 边的 relation 字段必须使用中文动词短语，禁止英文。
 
+---
 
-## /breachpoint \<path>
+## /breachpoint init \<path>
 
-如果未提供路径，使用 `.`。不要向用户询问路径。
+从 Markdown 文档生成 TTL 文件，再构建知识图谱。如果未提供路径，使用 `.`。
 
-### 步骤 1 — 确认安装，持久化解释器
+### 步骤 I1 — 确认安装，持久化解释器
+
 
 ```bash
 PYTHON=""
@@ -41,7 +43,86 @@ mkdir -p breachpoint-out
 
 **后续所有 bash 块用 `$(cat breachpoint-out/.bp_python)` 替代 `python3`。**
 
-### 步骤 2 — 发现 TTL 文件
+### 步骤 I2 — 发现 Markdown 文件
+
+```bash
+$(cat breachpoint-out/.bp_python) -c "
+import json
+from breachpoint.detect import detect_md
+print(json.dumps(detect_md('INPUT_PATH'), ensure_ascii=False))
+" > breachpoint-out/md_manifest.json
+cat breachpoint-out/md_manifest.json
+```
+
+### 步骤 I3 — 提取 TTL
+
+读取 `breachpoint-out/md_manifest.json` 中的 `files` 数组，**逐个文件**处理：
+
+对每个文件：
+1. 用 Read 工具读取文件内容
+2. 分析内容，提取文件中包括的节点和节点间关系边
+3. 按以下 Schema 生成 TTL，用 Write 工具写入 `breachpoint-out/bp.ttl`
+4. 同时，对于**跨文档潜在关系**（当前文件无法完全确认，但疑似/可能/深层存在的关系），追加写入 `breachpoint-out/pending_relations.md`，等待步骤4跨文档对比处理
+
+**TTL Schema**：
+```
+bp:Entity;
+    bp:id 英文蛇形命名（如:attention_mechanism）;
+    bp:label 本体中文名（如:注意力机制）;
+    bp:next 本体的下一跳（如:<id_1>,<id_2>,...,<id_n>);
+    bp:comment 综合该资源的所有声明写一句完整30-80字中文描述（如:账户级别的欠款和还款统计指标对象，记录客户每日的欠款状态、还款行为人数以及各渠道的还款成功金额。）.
+```
+
+**pending_relations.md 规则**：
+- 如:`<id_1><lable_1>` 与 KvCache 存在使用关系，当前`breachpoint-out/bp.ttl` 还不存在 KvCache 本体。
+- 每次处理新文件时换行追加，不覆盖
+
+### 步骤 I4 — 跨文档关系补全 + TTL 优化
+
+所有文件处理完毕后，执行全局对照与优化：
+
+1. 用 Read 工具读取 `breachpoint-out/bp.ttl` 和 `breachpoint-out/pending_relations.md`
+2. **从头到尾逐条审查** `pending_relations.md` 中每条潜在关系：
+   - 若两端节点现已都存在于 `bp.ttl`，则将该关系补充为正式边（在对应节点的 `bp:next` 中追加目标节点 id）
+   - 若仍有一端缺失，跳过（不发明节点）
+3. **全局交叉对照**：通读所有节点的 `bp:label` 和 `bp:comment`，识别尚未建立连接但语义上存在明确关联的节点对，补充边
+   - 仅补充有充分依据的关系，不确定时标注 AMBIGUOUS 并跳过
+   - 边的 relation 字段必须使用中文动词短语
+4. 用 Write 工具将优化后的完整内容覆盖写回 `breachpoint-out/bp.ttl`
+
+---
+
+## /breachpoint \<path>
+
+如果未提供路径，使用 `.`。不要向用户询问路径。
+
+### 步骤 B1 — 确认安装，持久化解释器
+
+```bash
+PYTHON=""
+BP_BIN=$(which breachpoint 2>/dev/null)
+if [ -z "$PYTHON" ] && command -v uv >/dev/null 2>&1; then
+    _UV_PY=$(uv tool run breachpoint python -c "import sys; print(sys.executable)" 2>/dev/null)
+    if [ -n "$_UV_PY" ]; then PYTHON="$_UV_PY"; fi
+fi
+if [ -z "$PYTHON" ] && [ -n "$BP_BIN" ]; then
+    _SHEBANG=$(head -1 "$BP_BIN" | tr -d '#!')
+    case "$_SHEBANG" in
+        *[!a-zA-Z0-9/_.-]*) ;;
+        *) "$_SHEBANG" -c "import breachpoint" 2>/dev/null && PYTHON="$_SHEBANG" ;;
+    esac
+fi
+if [ -z "$PYTHON" ]; then
+    if command -v python >/dev/null 2>&1; then PYTHON="python"; else PYTHON="python3"; fi
+fi
+"$PYTHON" -c "import breachpoint" 2>/dev/null || "$PYTHON" -m pip install breachpoint -q 2>/dev/null || "$PYTHON" -m pip install breachpoint -q --break-system-packages 2>&1 | tail -3
+mkdir -p breachpoint-out
+"$PYTHON" -c "import sys; open('breachpoint-out/.bp_python', 'w').write(sys.executable)"
+```
+
+**后续所有 bash 块用 `$(cat breachpoint-out/.bp_python)` 替代 `python3`。**
+
+### 步骤 B2 — 发现 TTL 文件
 
 ```bash
 $(cat breachpoint-out/.bp_python) -c "
@@ -54,7 +135,7 @@ cat breachpoint-out/manifest.json
 
 读取输出的 JSON，其中 `files` 数组包含所有 TTL 文件的 `path` 和 `rel_path`。记录文件列表 `breachpoint-out/manifest.json`。
 
-### 步骤 3 — rdflib 精确解析
+### 步骤 B3 — rdflib 精确解析
 
 读取 `breachpoint-out/manifest.json` 中 `files` 数组，解析所有 TTL 文件，直接写入 `extraction.json`：
 
@@ -82,7 +163,7 @@ print(f'extraction.json: {len(result[\"nodes\"])} nodes, {len(result[\"edges\"])
 "
 ```
 
-### 步骤 4 — 构建图谱
+### 步骤 B4 — 构建图谱
 
 读取 `breachpoint-out/extraction.json`，执行以下步骤：
 
@@ -109,7 +190,7 @@ print(f'Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {len(co
 " 2>&1
 ```
 
-### 步骤 5 — 生成报告
+### 步骤 B5 — 生成报告
 
 ```bash
 $(cat breachpoint-out/.bp_python) -c "
@@ -129,7 +210,7 @@ print('Report written')
 " 2>&1
 ```
 
-### 步骤 6 — 生成交互式 HTML
+### 步骤 B6 — 生成交互式 HTML
 
 ```bash
 $(cat breachpoint-out/.bp_python) -c "
