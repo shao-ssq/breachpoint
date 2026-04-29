@@ -123,9 +123,11 @@ def parse_ttl(path: str | Path, rel_path: str) -> dict:
         node.update(_data_props(g, subj))
         nodes[nid] = node
 
-    # Edges from object property domain/range
+    # Edges from object property domain/range (skip inverseOf props — covered by their forward counterpart)
     for prop in g.subjects(RDF.type, OWL.ObjectProperty):
         if not isinstance(prop, URIRef):
+            continue
+        if (prop, OWL.inverseOf, None) in g:
             continue
         pid = _local_name(str(prop))
         plabel = _zh_label(g, prop)
@@ -195,12 +197,17 @@ def parse_ttl(path: str | Path, rel_path: str) -> dict:
                 "evidence": f"TTL中显式声明 {_local_name(str(pred))}",
             })
 
+    # Collect all declared ObjectProperty URIs to avoid re-extracting them as instance triples
+    _declared_obj_props = frozenset(
+        str(p) for p in g.subjects(RDF.type, OWL.ObjectProperty) if isinstance(p, URIRef)
+    )
+
     # Edges from custom domain predicates (instance-level triples)
     for subj, pred, obj in g:
         if not isinstance(subj, URIRef) or not isinstance(obj, URIRef):
             continue
         ps = str(pred)
-        if ps in _SKIP_OBJECT_PREDICATES or ps in _EDGE_PREDICATES:
+        if ps in _SKIP_OBJECT_PREDICATES or ps in _EDGE_PREDICATES or ps in _declared_obj_props:
             continue
         src, tgt = _local_name(str(subj)), _local_name(str(obj))
         if src == tgt or not src or not tgt:

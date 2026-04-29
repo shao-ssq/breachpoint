@@ -225,12 +225,19 @@ sys.stdout.buffer.write(json.dumps(output, ensure_ascii=False, indent=2).encode(
 
 ### 步骤 Q6 — 回答问题
 
-综合 Q2–Q5 所有阶段结果，直接回答用户问题：
+**先读取以下中间文件（每个文件的格式不同，注意区分）：**
+- `query_stage1.json` — dict，包含 `exact`/`label`/`comment`/`edge` 四个键
+- `query_stage2.json` — 字符串列表，如 `["seed1", "seed2"]`
+- `query_stage3.json` — dict，包含 `nodes`（列表）和 `links`（列表）两个键
+- `query_stage4.json` — 字符串列表，如 `["target1", "target2"]`
+- `query_stage5.json` — 列表，每个元素是 `{id, label, type, comment, source, community, score, connections}` 的字典
+
+**以 `query_stage5.json` 为主要数据源**（score 降序排列的最终结果节点），结合 Q2 种子、Q3 粗筛上下文和 Q4 精确目标，直接回答用户问题：
 - 先给出一句话结论，再展开说明
 - 用通俗语言，避免术语堆砌，像向非技术人员解释一样清晰
 - 用类比、举例帮助理解复杂关系
 - 引用具体节点名、关系、evidence 作为依据，但要解释其含义而非直接罗列
 - 节点按 Q5 的 score 降序，最多引用 10 个
-- 不输出 原始 JSON、SQL、代码片段等技术查询语句
+- 不输出原始 JSON、SQL、代码片段等技术查询语句
 ---
 
