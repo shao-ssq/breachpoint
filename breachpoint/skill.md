@@ -82,118 +82,7 @@ print(f'extraction.json: {len(result[\"nodes\"])} nodes, {len(result[\"edges\"])
 "
 ```
 
-### 步骤 4 — 深度提炼关联边（重要）
-
-**禁止用脚本规则代替语义分析。** 必须由 Claude 亲自阅读节点内容、用语义理解推断关系。
-
-用 bash 读取节点数据供分析：
-
-```bash
-$(cat breachpoint-out/.bp_python) -c "
-import json
-from pathlib import Path
-data = json.loads(Path('breachpoint-out/extraction.json').read_text(encoding='utf-8'))
-existing = set()
-for e in data['edges']:
-    existing.add((e['source'], e['target']))
-    existing.add((e['target'], e['source']))
-by_type = {}
-for n in data['nodes']:
-    by_type.setdefault(n.get('type','?'), []).append(n)
-for t, nodes in sorted(by_type.items(), key=lambda x: -len(x[1])):
-    print(f'=== {t} ({len(nodes)}) ===')
-    for n in nodes:
-        print(f'  {n[\"id\"]} | {n[\"label\"]} | {n.get(\"comment\",\"\")[:80]}')
-" 2>&1
-```
-
-Claude 阅读输出后，按以下维度逐一审查，**每个维度必须输出发现结果**：
-
-1. **枚举类 → 宿主类**：`SessionType/TransStatus/PlanStatus/EventType/ActionType/RuleCategory` 等枚举节点，找其描述的宿主类，添加"描述"边
-2. **业务流程 → 系统**：每个 `Process_UCxx` 的 comment 中提到哪些系统，添加"依赖系统"边
-3. **组合关系**：`StrategyResultDetail` 与 `StrategyResult`、`ProcessStep` 与 `BusinessProcess` 等部分-整体关系
-4. **数据流向**：`PhysicalTable → MaterializedView → LogicalView` 的派生链
-5. **客户资产关系**：`Customer` 与 `Account/Loan/BankCard/Wallet` 的持有关系
-6. **活动子类**：`BusinessProcessDerivationActivity/FieldMappingActivity/JoinActivity` 等与父类 `DataProcessingActivity` 的继承关系
-
-将所有发现的边用 Python 追加到 `extraction.json`：
-
-```bash
-$(cat breachpoint-out/.bp_python) -c "
-import json
-from pathlib import Path
-data = json.loads(Path('breachpoint-out/extraction.json').read_text(encoding='utf-8'))
-existing = set()
-for e in data['edges']:
-    existing.add((e['source'], e['target'], e['relation']))
-
-new_edges = INFERRED_EDGES  # Claude 填入推断边列表
-
-added = 0
-for e in new_edges:
-    key = (e['source'], e['target'], e['relation'])
-    if key not in existing:
-        existing.add(key)
-        data['edges'].append(e)
-        added += 1
-Path('breachpoint-out/extraction.json').write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
-print(f'新增 {added} 条推断边，总边数: {len(data[\"edges\"])}')
-" 2>&1
-```
-
-每条推断边格式：`{"source": "...", "target": "...", "relation": "中文动词短语", "confidence": "INFERRED", "evidence": "一句中文说明推断依据"}`
-
-### 步骤 5 — 孤立节点二次识别
-
-找出所有孤立节点（无任何边连接），对每个孤立节点强制推断至少一条关联边：
-
-```bash
-$(cat breachpoint-out/.bp_python) -c "
-import json
-from pathlib import Path
-data = json.loads(Path('breachpoint-out/extraction.json').read_text(encoding='utf-8'))
-connected = set()
-for e in data['edges']:
-    connected.add(e['source'])
-    connected.add(e['target'])
-isolated = [n for n in data['nodes'] if n['id'] not in connected]
-print(f'孤立节点数: {len(isolated)}')
-for n in isolated:
-    print(f'  [{n[\"type\"]}] {n[\"id\"]} | {n[\"label\"]} | {n.get(\"comment\",\"\")[:100]}')
-" 2>&1
-```
-
-Claude 阅读每个孤立节点的 label/comment/type，**必须为每个孤立节点找到最相关的已有节点**，推断一条连接边。推断依据可以是：
-- label 或 comment 中提到的其他节点名
-- 同类型节点的归属关系
-- 语义上最接近的上位概念
-
-将这些边追加到 `extraction.json`，`confidence` 设为 `"AMBIGUOUS"`：
-
-```bash
-$(cat breachpoint-out/.bp_python) -c "
-import json
-from pathlib import Path
-data = json.loads(Path('breachpoint-out/extraction.json').read_text(encoding='utf-8'))
-existing = set()
-for e in data['edges']:
-    existing.add((e['source'], e['target'], e['relation']))
-
-new_edges = ISOLATED_EDGES  # Claude 填入孤立节点推断边列表
-
-added = 0
-for e in new_edges:
-    key = (e['source'], e['target'], e['relation'])
-    if key not in existing:
-        existing.add(key)
-        data['edges'].append(e)
-        added += 1
-Path('breachpoint-out/extraction.json').write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
-print(f'孤立节点新增 {added} 条边，总边数: {len(data[\"edges\"])}')
-" 2>&1
-```
-
-### 步骤 6 — 构建图谱
+### 步骤 4 — 构建图谱
 
 读取 `breachpoint-out/extraction.json`，执行以下步骤：
 
@@ -220,7 +109,7 @@ print(f'Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {len(co
 " 2>&1
 ```
 
-### 步骤 7 — 生成报告
+### 步骤 5 — 生成报告
 
 ```bash
 $(cat breachpoint-out/.bp_python) -c "
@@ -240,7 +129,7 @@ print('Report written')
 " 2>&1
 ```
 
-### 步骤 8 — 生成交互式 HTML
+### 步骤 6 — 生成交互式 HTML
 
 ```bash
 $(cat breachpoint-out/.bp_python) -c "
@@ -257,16 +146,6 @@ labels = {cid: f'社区 {cid}' for cid in communities}
 to_html(G, communities, Path('breachpoint-out/graph.html'), community_labels=labels)
 print('HTML written')
 " 2>&1
-```
-
-### 步骤 9 — 告知用户
-
-```
-知识图谱已构建完成。输出文件在 PATH/breachpoint-out/
-
-  graph.html       — 交互式图谱，用浏览器打开
-  GRAPH_REPORT.md  — 社区结构和核心连接
-  graph.json       — 原始图数据
 ```
 
 ---
